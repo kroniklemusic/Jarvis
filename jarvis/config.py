@@ -26,6 +26,7 @@ class Config:
     piper_voice: str = "en_GB-alan-medium"
     say_voice: str = "Daniel"
     speech_speed: float = 1.0
+    auto_fast_voice: bool = True
     wake_threshold: float = 0.5
     hotkey: str = "<ctrl>+<alt>+j"
     follow_up_seconds: float = 8.0

@@ -7,8 +7,9 @@ import queue
 import re
 import subprocess
 import threading
+import time
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Any, Callable, Iterator, Protocol
 
 import numpy as np
 
@@ -37,12 +38,30 @@ _ABBREVIATIONS = {"mr", "mrs", "ms", "dr", "st", "vs", "etc", "e.g", "i.e", "app
 
 
 class SentenceSplitter:
-    """Collects streamed text and hands back each sentence as soon as it is complete."""
+    """Collects streamed text and hands back each sentence as soon as it is complete.
 
-    def __init__(self) -> None:
+    To start talking sooner, a long FIRST sentence is split at its first comma (or similar)
+    once at least `first_clause_words` words have arrived."""
+
+    def __init__(self, first_clause_words: int = 6) -> None:
         self._buf = ""
+        self._emitted = False
+        self.first_clause_words = first_clause_words
 
     def feed(self, delta: str) -> list[str]:
+        out = self._feed_sentences(delta)
+        if not out and not self._emitted and self.first_clause_words:
+            for m in re.finditer(r"[,;:\u2014\u2013](?=\s)", self._buf):
+                if len(self._buf[:m.start()].split()) >= self.first_clause_words:
+                    clause, self._buf = self._buf[:m.end()], self._buf[m.end():]
+                    if clean_for_speech(clause):
+                        out.append(clean_for_speech(clause))
+                    break
+        if out:
+            self._emitted = True
+        return out
+
+    def _feed_sentences(self, delta: str) -> list[str]:
         self._buf += delta
         out: list[str] = []
         start = 0
@@ -69,46 +88,41 @@ class SentenceSplitter:
 
 # ---------------------------------------------------------------------- engines
 class TTSEngine(Protocol):
+    """An engine has either synthesize(text) -> (audio, sample_rate) chunks, or speak(text) that plays itself."""
     name: str
 
-    def speak(self, text: str) -> None: ...   # blocks until done or stopped
     def stop(self) -> None: ...
 
 
 class KokoroTTS:
+    """Kokoro voice. Produces audio; the Speaker plays it."""
     name = "kokoro"
     SAMPLE_RATE = 24_000
 
-    def __init__(self, voice: str, speed: float, player: Player):
+    def __init__(self, voice: str, speed: float):
         from kokoro import KPipeline
 
         # lang_code 'b' = British English, matching the bm_/bf_ voices.
         lang = "b" if voice.startswith("b") else "a"
         self._pipeline = KPipeline(lang_code=lang, repo_id="hexgrad/Kokoro-82M")
-        self.voice, self.speed, self.player = voice, speed, player
-        self._stopped = threading.Event()
-        for _ in self._pipeline("Ready.", voice=self.voice, speed=self.speed):  # warm-up / download voice
+        self.voice, self.speed = voice, speed
+        for _ in self.synthesize("Ready."):  # warm-up: loads (and first time downloads) the voice
             pass
 
-    def speak(self, text: str) -> None:
-        self._stopped.clear()
+    def synthesize(self, text: str) -> Iterator[tuple[np.ndarray, int]]:
         for result in self._pipeline(text, voice=self.voice, speed=self.speed):
-            if self._stopped.is_set():
-                return
-            if result.audio is None:
-                continue
-            if not self.player.play(result.audio.detach().cpu().numpy(), self.SAMPLE_RATE):
-                return
+            if result.audio is not None:
+                yield result.audio.detach().cpu().numpy(), self.SAMPLE_RATE
 
     def stop(self) -> None:
-        self._stopped.set()
-        self.player.stop()
+        pass
 
 
 class PiperTTS:
+    """Piper voice (fast, slightly more robotic). Produces audio; the Speaker plays it."""
     name = "piper"
 
-    def __init__(self, voice: str, voice_dir: Path, speed: float, player: Player):
+    def __init__(self, voice: str, voice_dir: Path, speed: float):
         from piper import PiperVoice, SynthesisConfig
 
         model = Path(voice_dir) / f"{voice}.onnx"
@@ -116,18 +130,13 @@ class PiperTTS:
             raise FileNotFoundError(f"Piper voice file not found: {model}. Run ./setup.sh again.")
         self._voice = PiperVoice.load(model)
         self._syn = SynthesisConfig(length_scale=1.0 / speed)
-        self.player = player
-        self._stopped = threading.Event()
 
-    def speak(self, text: str) -> None:
-        self._stopped.clear()
+    def synthesize(self, text: str) -> Iterator[tuple[np.ndarray, int]]:
         for chunk in self._voice.synthesize(text, syn_config=self._syn):
-            if self._stopped.is_set() or not self.player.play(chunk.audio_float_array, chunk.sample_rate):
-                return
+            yield chunk.audio_float_array, chunk.sample_rate
 
     def stop(self) -> None:
-        self._stopped.set()
-        self.player.stop()
+        pass
 
 
 def run_say(text: str, voice: str, rate_wpm: int) -> subprocess.Popen:
@@ -137,6 +146,7 @@ def run_say(text: str, voice: str, rate_wpm: int) -> subprocess.Popen:
 
 
 class SayTTS:
+    """The Mac's built-in voice. It plays the sound itself, so it has speak() instead of synthesize()."""
     name = "say"
 
     def __init__(self, voice: str, speed: float, runner: Callable[[str, str, int], subprocess.Popen] = run_say):
@@ -158,77 +168,125 @@ class SayTTS:
                 self._proc.terminate()
 
 
-def load_engines(names: list[str], cfg, player: Player) -> list[TTSEngine]:
-    """Load each configured engine; skip (and log) any that fail to load."""
-    engines: list[TTSEngine] = []
+SPEED_TEST_TEXT = "Certainly. I'll take care of that for you right away, and let you know when it's done."
+
+
+def speed_ratio(engine: Any, clock: Callable[[], float] = time.monotonic) -> float:
+    """Seconds of work per second of speech. 0.2 means 5x faster than real time; above 1 is too slow."""
+    t0 = clock()
+    seconds = sum(len(a) / sr for a, sr in engine.synthesize(SPEED_TEST_TEXT))
+    return (clock() - t0) / seconds if seconds else float("inf")
+
+
+def load_engines(names: list[str], cfg, notify: Callable[[str], None] | None = None) -> list[Any]:
+    """Load each configured engine; skip (and log) any that fail to load.
+
+    If cfg.auto_fast_voice is on and Kokoro turns out to be slow on this Mac, Piper is moved first
+    so replies start quickly."""
+    engines: list[Any] = []
     for name in names:
         try:
             if name == "kokoro":
-                engines.append(KokoroTTS(cfg.kokoro_voice, cfg.speech_speed, player))
+                engines.append(KokoroTTS(cfg.kokoro_voice, cfg.speech_speed))
             elif name == "piper":
-                engines.append(PiperTTS(cfg.piper_voice, cfg.piper_dir, cfg.speech_speed, player))
+                engines.append(PiperTTS(cfg.piper_voice, cfg.piper_dir, cfg.speech_speed))
             elif name == "say":
                 engines.append(SayTTS(cfg.say_voice, cfg.speech_speed))
             log.info("Voice engine ready: %s", name)
         except Exception as exc:
             log.warning("Voice engine %s could not load: %s", name, exc)
-    return engines
+    return prefer_fast_engine(engines, cfg, notify)
+
+
+def prefer_fast_engine(engines: list[Any], cfg, notify: Callable[[str], None] | None = None,
+                       measure: Callable[[Any], float] = speed_ratio) -> list[Any]:
+    if not engines or not hasattr(engines[0], "synthesize"):
+        return engines
+    try:
+        ratio = measure(engines[0])
+    except Exception as exc:
+        log.warning("Voice speed test failed: %s", exc)
+        return engines
+    log.info("Voice speed: %s needs %.2f s of work per second of speech", engines[0].name, ratio)
+    if not getattr(cfg, "auto_fast_voice", True) or ratio <= SLOW_VOICE_RATIO:
+        return engines
+    faster = [e for e in engines[1:] if e.name == "piper"]
+    if not faster:
+        return engines
+    first = engines[0]
+    reordered = [faster[0], first] + [e for e in engines[1:] if e is not faster[0]]
+    if notify:
+        notify(f"  The {first.name} voice is slow on this Mac, so I'll use the faster piper voice for quick replies.\n"
+               f"  (To keep {first.name} anyway, set auto_fast_voice: false in config.yaml.)")
+    return reordered
+
+
+SLOW_VOICE_RATIO = 0.5   # Kokoro taking more than half the speech length means a noticeable wait
 
 
 # ---------------------------------------------------------------------- speaker
 class Speaker:
-    """Speaks sentences one after another on a background thread.
+    """Speaks sentences in order, without gaps, while Claude is still writing.
 
-    say() queues a sentence and returns at once, so Claude can keep streaming.
-    interrupt() stops the current sentence and drops the queue (barge-in).
-    If an engine fails, the next engine in the list takes over.
+    Two background threads work as a pipeline:
+      * the "voice builder" turns each queued sentence into audio, and
+      * the "player" plays audio as soon as it is ready,
+    so sentence 2 is being prepared while sentence 1 plays.
+
+    say() queues a sentence and returns at once. interrupt() stops the sound and drops everything
+    queued (barge-in). If an engine fails, the next engine in the list takes over.
     """
 
-    def __init__(self, engines: list[TTSEngine]):
+    def __init__(self, engines: list[Any], player: Player | None = None,
+                 clock: Callable[[], float] = time.monotonic):
         if not engines:
             raise RuntimeError("No voice engine could start.")
         self.engines = list(engines)
-        self._q: queue.Queue[tuple[int, str] | None] = queue.Queue()
+        self.player = player or Player()
+        self.clock = clock
+        self._text_q: queue.Queue = queue.Queue()
+        self._audio_q: queue.Queue = queue.Queue()
         self._generation = 0
-        self._busy = threading.Event()
-        self._active = False           # True while an engine is actually speaking
+        self._pending = 0                  # sentences queued but not yet fully spoken
         self._lock = threading.Lock()
-        self._thread = threading.Thread(target=self._run, name="speaker", daemon=True)
-        self._thread.start()
+        self._threads = [threading.Thread(target=self._build_loop, name="voice-builder", daemon=True),
+                         threading.Thread(target=self._play_loop, name="voice-player", daemon=True)]
+        for t in self._threads:
+            t.start()
 
     @property
-    def engine(self) -> TTSEngine:
+    def engine(self) -> Any:
         return self.engines[0]
 
+    # -- public
     def say(self, text: str) -> None:
         text = clean_for_speech(text)
         if text:
             with self._lock:
-                self._busy.set()
-                self._q.put((self._generation, text))
+                self._pending += 1
+                self._text_q.put((self._generation, text, self.clock()))
 
     def interrupt(self) -> None:
         with self._lock:
             self._generation += 1
-            try:
-                while True:
-                    self._q.get_nowait()
-            except queue.Empty:
-                pass
-            if not self._active:
-                self._busy.clear()
+            self._pending = 0
+            for q in (self._text_q, self._audio_q):
+                try:
+                    while True:
+                        q.get_nowait()
+                except queue.Empty:
+                    pass
+        self.player.stop()
         for e in self.engines:
             e.stop()
 
     def is_speaking(self) -> bool:
-        return self._busy.is_set()
+        return self._pending > 0
 
     def wait(self, timeout: float | None = None) -> bool:
         """Wait until everything queued has been spoken."""
-        import time
-
         deadline = None if timeout is None else time.monotonic() + timeout
-        while self._busy.is_set():
+        while self.is_speaking():
             if deadline is not None and time.monotonic() > deadline:
                 return False
             time.sleep(0.02)
@@ -236,35 +294,98 @@ class Speaker:
 
     def close(self) -> None:
         self.interrupt()
-        self._q.put(None)
+        self._text_q.put(None)
+        self._audio_q.put(None)
 
-    def _run(self) -> None:
+    # -- internals
+    def _current(self, gen: int) -> bool:
+        return gen == self._generation
+
+    def _finish_sentence(self, gen: int) -> None:
+        with self._lock:
+            if self._current(gen) and self._pending > 0:
+                self._pending -= 1
+
+    def _next_engine(self, failed: Any, exc: Exception) -> bool:
+        """Drop a broken engine. Returns False if none are left."""
+        with self._lock:
+            if failed not in self.engines:      # someone already switched away from it
+                return bool(self.engines)
+            if len(self.engines) == 1:
+                log.error("Voice engine %s failed (%s) and there is no other voice to try.", failed.name, exc)
+                return False
+            if self.engines[0] is failed:
+                self.engines.pop(0)
+        log.warning("Voice engine %s failed (%s); switching to %s.", failed.name, exc, self.engines[0].name)
+        return True
+
+    def _build_loop(self) -> None:
         while True:
-            item = self._q.get()
+            item = self._text_q.get()
             if item is None:
                 return
-            gen, text = item
-            with self._lock:
-                current = gen == self._generation
-                self._active = current
-            if current:
-                self._speak_with_fallback(text, gen)
-            with self._lock:
-                self._active = False
-                if self._q.empty():
-                    self._busy.clear()
+            gen, text, queued_at = item
+            if not self._current(gen):
+                continue
+            while True:
+                engine = self.engines[0]
+                if not hasattr(engine, "synthesize"):          # e.g. macOS `say`: the player runs it
+                    self._audio_q.put((gen, "speak", (engine, text), queued_at))
+                    break
+                produced = 0
+                started = self.clock()
+                try:
+                    for samples, rate in engine.synthesize(text):
+                        if not self._current(gen):
+                            break
+                        if produced == 0:
+                            log.info("voice: first audio of %r ready %.2fs after queueing (%s)",
+                                     text[:40], self.clock() - queued_at, engine.name)
+                        produced += 1
+                        self._audio_q.put((gen, "audio", (samples, rate), queued_at))
+                    log.debug("voice: built %r in %.2fs", text[:40], self.clock() - started)
+                    break
+                except Exception as exc:
+                    if produced or not self._current(gen) or not self._next_engine(engine, exc):
+                        break
+            self._audio_q.put((gen, "end", None, queued_at))
 
-    def _speak_with_fallback(self, text: str, gen: int) -> None:
-        while self.engines:
-            engine = self.engines[0]
+    def _play_loop(self) -> None:
+        first_audio_logged: set[float] = set()
+        while True:
+            item = self._audio_q.get()
+            if item is None:
+                return
+            gen, kind, payload, queued_at = item
+            if not self._current(gen):
+                continue
+            if kind == "end":
+                self._finish_sentence(gen)
+                continue
+            if queued_at not in first_audio_logged:
+                first_audio_logged.add(queued_at)
+                log.info("voice: started speaking %.2fs after the sentence was queued", self.clock() - queued_at)
+                if len(first_audio_logged) > 1000:
+                    first_audio_logged.clear()
+            if kind == "audio":
+                samples, rate = payload
+                self.player.play(samples, rate)
+            else:
+                self._speak_directly(gen, *payload)
+
+    def _speak_directly(self, gen: int, engine: Any, text: str) -> None:
+        while self._current(gen):
+            if engine not in self.engines:       # it broke after this sentence was queued
+                engine = self.engines[0]
             try:
-                engine.speak(text)
+                if hasattr(engine, "synthesize"):
+                    for samples, rate in engine.synthesize(text):
+                        if not self._current(gen) or not self.player.play(samples, rate):
+                            return
+                else:
+                    engine.speak(text)
                 return
             except Exception as exc:
-                if gen != self._generation:
+                if not self._current(gen) or not self._next_engine(engine, exc):
                     return
-                log.warning("Voice engine %s failed (%s); switching to the next one.", engine.name, exc)
-                if len(self.engines) == 1:
-                    log.error("No voice engine left to speak: %r", text)
-                    return
-                self.engines.pop(0)
+                engine = self.engines[0]

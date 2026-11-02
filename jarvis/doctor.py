@@ -167,28 +167,28 @@ def check_mcp_servers(repo: Path = REPO_ROOT, timeout: float = 120.0) -> list[Ch
 
 def check_voice(speak: Callable[[], str] | None = None) -> Check:
     def _speak() -> str:
-        from .audio import Player
-        from .tts import load_engines
+        from .tts import Speaker, load_engines
 
         cfg = load_config()
-        engines = load_engines(cfg.tts_engines, cfg, Player())
-        last_error = "no voice engine could load"
-        for engine in engines:
-            try:
-                engine.speak("Good day. This is JARVIS, testing my voice.")
-                return engine.name
-            except Exception as exc:
-                last_error = f"{engine.name}: {exc}"
-        raise RuntimeError(last_error)
+        engines = load_engines(cfg.tts_engines, cfg, notify=print)
+        if not engines:
+            raise RuntimeError("no voice engine could load")
+        speaker = Speaker(engines)
+        speaker.say("Good day. This is JARVIS, testing my voice.")
+        speaker.wait(30)
+        name = speaker.engine.name
+        speaker.close()
+        return name
 
     try:
         name = (speak or _speak)()
     except Exception as exc:
         return Check("Voice (you should have heard a test sentence)", False, str(exc), "Run ./setup.sh again.")
-    warn = name != "kokoro"
+    warn = name == "say"
     return Check("Voice (you should have heard a test sentence)", True,
-                 f"using {name}" + (" - the main Kokoro voice didn't work, so a backup voice was used" if warn else ""),
-                 "Run ./setup.sh again to repair the Kokoro voice." if warn else "", warning=warn)
+                 f"using {name}" + (" - the Kokoro and Piper voices didn't work, so the Mac's own voice was used"
+                                    if warn else ""),
+                 "Run ./setup.sh again to repair the voices." if warn else "", warning=warn)
 
 
 # ------------------------------------------------------------------------- report

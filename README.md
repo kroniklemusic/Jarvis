@@ -204,6 +204,7 @@ explaining it. If you make a typo, JARVIS tells you which line is wrong when it 
 | `end_of_speech_silence_ms` | How long a pause ends your request. Raise it to `1000` if JARVIS cuts you off. |
 | `confirm_timeout_seconds` | How long it waits for "yes, proceed" or "no". |
 | `chime` | `false` turns off the *tink* sound. |
+| `auto_fast_voice` | If Kokoro is too slow on your Mac, JARVIS uses the faster Piper voice so replies start quickly. Set to `false` to always use Kokoro. |
 
 ## Optional: Google Workspace
 
@@ -263,6 +264,7 @@ It checks each of these and tells you how to fix anything that fails:
 | "Claude Code is installed but not signed in" | Type `claude` in Terminal, sign in, type `/exit`, and start JARVIS again. |
 | "Sorry, something went wrong" | Ask again. If it keeps happening, run `./doctor.sh`, and look at the end of `logs/jarvis.log`. |
 | "Claude took too long to answer" | Usually a slow website or a busy service. Ask again. JARVIS reconnects by itself and remembers the conversation. |
+| JARVIS takes several seconds to start speaking | Restart JARVIS. At startup it times the Kokoro voice. If Kokoro is too slow on your Mac, it switches to the faster Piper voice and says so. Look in `logs/jarvis.log` for lines starting `voice:` to see the timings. |
 | The voice suddenly sounds different or robotic | The main voice (Kokoro) failed, so JARVIS switched to a backup. Run `./setup.sh` again. |
 | "There's a problem in config.yaml" | The message names the setting. Fix the spelling or value, or copy that line back from GitHub. |
 | Setup stopped while downloading | Check your internet connection and run `./setup.sh` again. It continues where it left off. |

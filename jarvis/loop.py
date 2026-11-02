@@ -267,7 +267,7 @@ def build_and_run(cfg: Config, prepare_only: bool = False) -> int:  # pragma: no
         cfg.piper_dir.mkdir(parents=True, exist_ok=True)
         download_voice(cfg.piper_voice, cfg.piper_dir)
     player = Player()
-    engines = load_engines(cfg.tts_engines, cfg, player)
+    engines = load_engines(cfg.tts_engines, cfg, notify=say_to_user)
     if not engines:
         say_to_user("None of the voices could start. Run ./setup.sh again.")
         return 1
@@ -277,7 +277,7 @@ def build_and_run(cfg: Config, prepare_only: bool = False) -> int:  # pragma: no
         say_to_user("All models are downloaded and ready.")
         return 0
 
-    speaker = Speaker(engines)
+    speaker = Speaker(engines, player)
     logger = TurnLogger(cfg.log_path)
     brain = ClaudeBrain(cfg, logger)
     brain.start()
