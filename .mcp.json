@@ -1,0 +1,43 @@
+{
+  "mcpServers": {
+    "macos-automator": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@steipete/macos-automator-mcp@0.4.7"
+      ]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.84",
+        "--isolated",
+        "--browser",
+        "firefox"
+      ]
+    },
+    "duckduckgo": {
+      "command": "uvx",
+      "args": [
+        "duckduckgo-mcp-server==0.7.0"
+      ]
+    },
+    "google-workspace": {
+      "command": "uvx",
+      "args": [
+        "workspace-mcp==2.3.0",
+        "--single-user",
+        "--tools",
+        "gmail",
+        "calendar",
+        "drive",
+        "docs"
+      ],
+      "env": {
+        "GOOGLE_OAUTH_CLIENT_ID": "${GOOGLE_OAUTH_CLIENT_ID:-}",
+        "GOOGLE_OAUTH_CLIENT_SECRET": "${GOOGLE_OAUTH_CLIENT_SECRET:-}"
+      }
+    }
+  }
+}

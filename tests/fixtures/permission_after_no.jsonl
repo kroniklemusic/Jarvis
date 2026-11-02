@@ -1,0 +1,4 @@
+{"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "The user said no.", "is_error": true, "tool_use_id": "toolu_FAKE02"}]}, "session_id": "00000000-0000-4000-8000-000000000001"}
+{"type": "system", "subtype": "status", "status": "requesting"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "I didn't create `made_by_claude.txt`. The `touch` command was declined, so I haven't retried it. Tell me if you'd like me to try again or do something different."}]}, "session_id": "00000000-0000-4000-8000-000000000001"}
+{"type": "result", "subtype": "success", "is_error": false, "result": "I didn't create `made_by_claude.txt`. The `touch` command was declined, so I haven't retried it. Tell me if you'd like me to try again or do something different.", "num_turns": 2, "session_id": "00000000-0000-4000-8000-000000000001"}

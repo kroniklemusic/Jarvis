@@ -43,6 +43,10 @@ listen_timeout_seconds: 6
 # Longest single request, in seconds.
 max_request_seconds: 30
 
+# When JARVIS asks "Shall I proceed?", how long it waits for your yes or no.
+# If you say nothing, it takes that as a no.
+confirm_timeout_seconds: 15
+
 # --- Speech recognition ------------------------------------------------
 # Model used on Apple Silicon Macs (M1, M2, M3, M4 ...).
 whisper_model_apple: mlx-community/whisper-large-v3-turbo

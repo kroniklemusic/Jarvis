@@ -1,133 +1,307 @@
 # JARVIS
 
 A voice assistant for your Mac. Say **"hey Jarvis"**, ask for something out loud, and JARVIS
-answers out loud using Claude Code on your Mac.
+answers out loud. It can search the web, browse websites and control apps on your Mac. It always
+asks you first before it does anything that changes, sends or deletes something.
 
-Everything runs on your Mac except Claude itself, which uses your existing Claude Pro or Max
-subscription through the official `claude` program. No API key is needed, and JARVIS never uses one.
-All the other parts (wake word, speech recognition and voices) are free and open source, and they
-run offline once downloaded.
+The "brain" is Claude Code, running on your Mac under your existing **Claude Pro or Max**
+subscription. JARVIS never uses an API key, so there are no per-request charges. Everything else
+(wake word, speech recognition, voices and tools) is free and open source. The speech parts run
+entirely on your Mac.
 
-> **Status: Phase 1.** Voice in, Claude, voice out. Tools (controlling apps, browsing the web)
-> come in Phase 2. Memory and starting automatically at login come in Phase 3.
+---
+
+## Contents
+
+1. [What you need](#what-you-need)
+2. [One-time setup](#one-time-setup)
+3. [Daily use: start, talk, stop](#daily-use)
+4. [What JARVIS can do, and how it asks permission](#what-jarvis-can-do)
+5. [Memory](#memory)
+6. [Start automatically at login](#start-automatically-at-login)
+7. [Mac permissions (microphone, Automation, ...)](#mac-permissions)
+8. [Changing the voice and other settings](#changing-settings)
+9. [Optional: Gmail, Calendar and Google Drive](#optional-google-workspace)
+10. [Health check](#health-check)
+11. [Troubleshooting](#troubleshooting)
+12. [Updating and removing JARVIS](#updating-and-removing)
+13. [Logs and privacy](#logs-and-privacy)
 
 ---
 
 ## What you need
 
-- A Mac (Apple Silicon or Intel) with macOS 13 or newer, a microphone and speakers.
+- A Mac (Apple Silicon or Intel) with macOS 13 Ventura or newer, a microphone and speakers.
 - A Claude Pro or Max subscription.
-- About 6 GB of free disk space and an internet connection for the first setup.
+- About 8 GB of free disk space, and an internet connection for setup.
 
 ## One-time setup
 
-1. **Install Homebrew** if you don't have it. Open the **Terminal** app, go to <https://brew.sh>,
-   copy the install line shown there, paste it into Terminal and press Return. Follow what it says.
-2. **Install Claude Code and sign in:**
-   ```bash
-   curl -fsSL https://claude.ai/install.sh | bash
-   ```
-   Open a **new** Terminal window, type `claude`, press Return, and sign in with your Claude
-   account. When it's ready, type `/exit`.
-3. **Download JARVIS and run setup:**
-   ```bash
-   git clone https://github.com/YOUR-GITHUB-NAME/jarvis.git
-   ```
-   ```bash
-   cd jarvis
-   ```
-   ```bash
-   ./setup.sh
-   ```
-   Setup installs the helper tools, creates a private Python environment inside the `jarvis` folder,
-   and downloads the speech and voice models. The first run takes 10 to 30 minutes, depending on your
-   internet speed. You can run `./setup.sh` again at any time, and it skips what's already done.
+You'll type a few commands into the **Terminal** app. To open it, press Command + Space, type
+`Terminal` and press Return. Paste each grey box below, one at a time, and press Return.
+
+**1. Install Homebrew** (a free installer for developer tools), if you don't have it already.
+Go to <https://brew.sh>, copy the install line shown there, paste it into Terminal and follow its
+instructions. At the end it may show two or three extra lines to run. Run those too.
+
+**2. Install Claude Code and sign in:**
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+Close Terminal and open a **new** window. Type `claude`, press Return, and sign in with your
+Claude Pro or Max account. When you see the chat prompt, type `/exit`.
+
+**3. Download JARVIS:**
+```bash
+git clone https://github.com/kroniklemusic/jarvis.git ~/jarvis
+```
+If a box appears asking to install "command line developer tools", click **Install**, wait until it
+finishes, then paste the line again.
+
+**4. Run setup:**
+```bash
+cd ~/jarvis
+```
+```bash
+./setup.sh
+```
+
+Setup takes 15 to 40 minutes the first time, mostly downloading. It will:
+- install the helper tools (ffmpeg, portaudio, uv, Node);
+- make a private Python environment inside the `jarvis` folder;
+- download the wake word, speech recognition, voice and web-browser files;
+- **open Claude Code once** so you can trust the JARVIS folder. When asked, choose
+  **"Yes, I trust this folder"**, then type `/exit`;
+- run the [health check](#health-check). You'll hear a test sentence;
+- ask whether JARVIS should start automatically at login.
+
+You can run `./setup.sh` again at any time. It skips whatever is already done.
 
 ## Daily use
 
-**Start JARVIS.** In Terminal, inside the `jarvis` folder:
+**Start JARVIS.** Do either of these:
+- In Finder, open the `jarvis` folder, then the `launchd` folder, and double-click **start-jarvis.command**; or
+- in Terminal:
+  ```bash
+  cd ~/jarvis && .venv/bin/python -m jarvis
+  ```
 
+Startup takes 10 to 30 seconds. It's ready when you hear **"At your service."**
+
+**Talk to it:**
+- Say **"hey Jarvis"**. A soft *tink* means it's listening. Ask your question normally.
+- When you stop talking, JARVIS answers out loud. It starts speaking before it has finished thinking.
+- **Follow-ups:** for 8 seconds after it finishes, just keep talking. No need to say "hey Jarvis" again.
+- **Interrupt:** say "hey Jarvis" while it's talking. It stops at once and listens.
+- **Push-to-talk:** press **Control + Option + J** instead of saying "hey Jarvis".
+
+**Stop JARVIS:** click its Terminal window and press **Control + C**, or just close the window.
+
+Try saying:
+- "Hey Jarvis, what's the weather in London tomorrow?"
+- "Hey Jarvis, search the web for a good banana bread recipe."
+- "Hey Jarvis, open Safari and go to bbc.co.uk."
+- "Hey Jarvis, what's on my calendar today?" (uses the Calendar app)
+- "Hey Jarvis, remember that my sister's name is Anna."
+
+## What JARVIS can do
+
+| Tool | What it's for | Does JARVIS ask first? |
+|---|---|---|
+| Web search (DuckDuckGo, and Claude's own search) | Answering questions with up-to-date facts | No. It only reads. |
+| Web browser (Playwright, using an open-source Firefox) | Opening and reading websites | Opening and reading: no. **Clicking, typing, filling in forms: yes.** |
+| Mac automation (AppleScript) | Controlling apps: Mail, Calendar, Reminders, Music, Finder, Safari... | **Yes, every time.** |
+| Files and commands | Reading files, running commands | Reading: no. **Changing files or running commands: yes.** |
+| Memory (`memory/` folder) | Remembering facts about you | No |
+
+Some things JARVIS will **never** do. It's blocked from reading passwords, `.env` files, SSH keys or
+your keychain, and from running `curl`, `wget`, `sudo` or `rm -rf`. Commands run inside the macOS sandbox.
+
+### How permission works
+
+When Claude needs your OK, JARVIS tells you what it wants to do and asks:
+
+> "I'd like to run an AppleScript that controls apps on your Mac. Shall I proceed? Say yes, proceed, or no."
+
+You'll hear a *tink*. Then:
+- Say **"yes, proceed"** (or "yes", "go ahead") to allow it.
+- Say **"no"** (or "stop", "cancel") to refuse.
+- If JARVIS can't understand you, it asks once more. Saying nothing for 15 seconds counts as **no**.
+- If you say "hey Jarvis" during the question, that also counts as **no**.
+
+Before it sends, deletes, buys or posts anything, JARVIS also says exactly what it's about to do and
+waits for your yes. It treats text from websites and emails as information, never as instructions,
+so a web page can't tell it what to do.
+
+## Memory
+
+JARVIS remembers lasting facts you tell it, such as names, preferences and routines. It keeps them
+in **`memory/facts.md`**, a plain text file inside the `jarvis` folder.
+- Say "remember that I take my coffee black" and it adds a line to that file.
+- To check or correct what it knows, open `memory/facts.md` with TextEdit. You can edit or delete
+  any line.
+- It never stores passwords, card numbers or anything you call secret.
+- Your memory file is never uploaded to GitHub. Setup tells git to leave it alone.
+
+## Start automatically at login
+
+To turn it **on** (setup also offers to do this):
 ```bash
-.venv/bin/python -m jarvis
+~/jarvis/launchd/install-autostart.sh
+```
+After that, each time you log in a Terminal window opens with JARVIS running in it. Close the
+window or press Control + C to stop it for this session.
+
+To turn it **off**:
+```bash
+~/jarvis/launchd/install-autostart.sh --remove
 ```
 
-Wait for **"JARVIS is ready"** and a spoken "At your service." Then:
+## Mac permissions
 
-- Say **"hey Jarvis"**. You'll hear a soft *tink*. Then ask your question.
-- Stop talking, and after a short pause JARVIS answers out loud.
-- For about **8 seconds** after it answers, you can ask a follow-up question **without** saying
-  "hey Jarvis" again.
-- To **interrupt** JARVIS while it's talking, say "hey Jarvis" again. It stops and listens.
-- **Push-to-talk:** instead of saying "hey Jarvis", you can press **Control + Option + J**.
-
-**Stop JARVIS:** click the Terminal window and press **Control + C**.
-
-## Granting Mac permissions
-
-macOS asks for permission the first time JARVIS needs something. If you clicked "Don't Allow" by
-mistake, you can turn it back on yourself:
+macOS asks for permission the first time JARVIS needs something. Click **Allow** or **OK**.
+If you clicked "Don't Allow" by mistake, you can turn it back on yourself:
 
 | Permission | Why JARVIS needs it | Where to turn it on |
 |---|---|---|
 | **Microphone** | To hear you | System Settings → Privacy & Security → **Microphone** → turn on **Terminal** |
-| **Accessibility** | For the push-to-talk shortcut | System Settings → Privacy & Security → **Accessibility** → turn on **Terminal** |
+| **Automation** | To control apps (Mail, Calendar, Safari, ...) | System Settings → Privacy & Security → **Automation** → find **Terminal** (or **node**) → turn on each app you want JARVIS to control |
+| **Accessibility** | For the push-to-talk shortcut, and for some app controls | System Settings → Privacy & Security → **Accessibility** → turn on **Terminal** |
 | **Input Monitoring** | For the push-to-talk shortcut on some macOS versions | System Settings → Privacy & Security → **Input Monitoring** → turn on **Terminal** |
-| **Automation** (Phase 2) | To control apps such as Mail, Calendar or Safari | System Settings → Privacy & Security → **Automation** → under **Terminal**, turn on each app |
 
-After changing a permission, quit JARVIS (Control + C) and start it again.
-If you use iTerm or another terminal app instead of Terminal, grant the permissions to that app instead.
+After changing a permission, stop JARVIS and start it again. If you use iTerm or another terminal
+app instead of Terminal, give the permissions to that app instead.
+
+The first time JARVIS controls a new app, macOS shows "Terminal wants access to control *App*".
+Click **OK**. If you click "Don't Allow", turn it on again under **Automation**, as in the table.
 
 ## Changing settings
 
-All settings are in **`config.yaml`** in the `jarvis` folder. Open it with TextEdit, change a value,
-save, and restart JARVIS. Each setting has a note explaining it.
+All settings are in **`config.yaml`** inside the `jarvis` folder. Open it with TextEdit (right-click
+→ Open With → TextEdit), change a value, save, and restart JARVIS. Every setting has a note
+explaining it. If you make a typo, JARVIS tells you which line is wrong when it starts.
 
 ### Changing the voice
 
-- **Different Kokoro voice** (the default engine): change `kokoro_voice`. British male voices:
-  `bm_george` (default), `bm_lewis`, `bm_daniel`, `bm_fable`. British female voices: `bf_emma`,
-  `bf_isabella`, `bf_alice`, `bf_lily`. American voices also work, for example `am_michael` or `af_heart`.
-- **Speak faster or slower:** change `speech_speed`. For example, `1.15` is a little faster.
-- **Use the backup voice engines:** `tts_engines` sets the order JARVIS tries them in. If one
-  fails, JARVIS moves to the next one automatically. `say` is the Mac's built-in voice, and
-  `say_voice` chooses which one it uses.
+- **Choose a different voice:** change `kokoro_voice`.
+  - British male voices: `bm_george` (default), `bm_lewis`, `bm_daniel`, `bm_fable`.
+  - British female voices: `bf_emma`, `bf_isabella`, `bf_alice`, `bf_lily`.
+  - American voices also work, for example `am_michael`, `am_adam`, `af_heart`, `af_bella`.
+- **Speak faster or slower:** change `speech_speed`. For example, `1.15` is a little faster and `0.9` a little slower.
+- **Backup voices:** `tts_engines` is the order JARVIS tries its voice engines in (`kokoro`, then
+  `piper`, then `say`, the Mac's built-in voice). If one fails, it moves to the next one by itself.
+  `piper_voice` and `say_voice` choose those voices. If you change `piper_voice`, run `./setup.sh`
+  again to download it.
 
-### Other useful settings
+### Other settings
 
-- `model`: which Claude model answers. The choices are `sonnet` (default), `opus` and `haiku`.
-- `wake_threshold`: raise it (e.g. `0.7`) if JARVIS wakes up by accident. Lower it (e.g. `0.35`) if it ignores you.
-- `follow_up_seconds`: how long JARVIS listens for a follow-up question. `0` turns follow-ups off.
-- `hotkey`: the push-to-talk shortcut.
+| Setting | What it does |
+|---|---|
+| `model` | Which Claude model answers: `sonnet` (default), `opus` (smartest, slower) or `haiku` (fastest). |
+| `wake_threshold` | Raise it (e.g. `0.7`) if JARVIS wakes up by accident. Lower it (e.g. `0.35`) if it doesn't hear you. |
+| `hotkey` | The push-to-talk shortcut. |
+| `follow_up_seconds` | How long it listens for a follow-up. `0` turns follow-ups off. |
+| `end_of_speech_silence_ms` | How long a pause ends your request. Raise it to `1000` if JARVIS cuts you off. |
+| `confirm_timeout_seconds` | How long it waits for "yes, proceed" or "no". |
+| `chime` | `false` turns off the *tink* sound. |
+
+## Optional: Google Workspace
+
+JARVIS can also read and draft Gmail, and use Google Calendar, Drive and Docs. This is **off** by
+default because it needs a one-time Google setup, which takes about 15 minutes:
+
+1. Go to <https://console.cloud.google.com/>, sign in, and create a new project (any name, e.g. "jarvis").
+2. Open **APIs & Services → Library**. Enable the **Gmail API**, **Google Calendar API**,
+   **Google Drive API** and **Google Docs API**.
+3. Open **APIs & Services → OAuth consent screen**. Choose **External**, fill in the app name and
+   your email, and under **Test users** add your own Gmail address.
+4. Open **APIs & Services → Credentials → Create credentials → OAuth client ID**. Choose
+   **Desktop app** as the type, then click Create. Keep the **Client ID** and **Client secret** handy.
+5. In Terminal, run `open -e ~/.zshrc` and add these two lines at the bottom, with your own values
+   between the quotes. Then save and close the file.
+   ```
+   export GOOGLE_OAUTH_CLIENT_ID="paste-client-id-here"
+   export GOOGLE_OAUTH_CLIENT_SECRET="paste-client-secret-here"
+   ```
+6. Open `.claude/settings.json` in the `jarvis` folder with TextEdit. It's hidden, so in Finder press
+   Command + Shift + . to show hidden files. Move `"google-workspace"` from the
+   `disabledMcpjsonServers` list to the `enabledMcpjsonServers` list.
+7. Open a new Terminal window and start JARVIS. The first time you ask about email or your calendar,
+   a browser window opens so you can sign in to Google and allow access.
+
+JARVIS asks your permission ("Shall I proceed?") before **every** Google Workspace action, including reading.
+
+## Health check
+
+If something seems wrong, run:
+```bash
+cd ~/jarvis && ./doctor.sh
+```
+It checks each of these and tells you how to fix anything that fails:
+- Claude Code is installed and you're signed in.
+- No `ANTHROPIC_API_KEY` is set.
+- The JARVIS folder is trusted.
+- The microphone works.
+- Each tool server starts.
+- The voice speaks a test line.
 
 ## Troubleshooting
 
 | What you see or hear | What to do |
 |---|---|
 | "I can't use the microphone" | Turn on Terminal under System Settings → Privacy & Security → Microphone, then restart JARVIS. |
-| JARVIS never reacts to "hey Jarvis" | Speak clearly at normal volume, about an arm's length from the Mac. Lower `wake_threshold` to `0.35`. Check that the right microphone is selected under System Settings → Sound → Input. |
+| JARVIS never reacts to "hey Jarvis" | Speak clearly at normal volume, about an arm's length away. Check System Settings → Sound → Input shows the right microphone. Lower `wake_threshold` to `0.35`. Push-to-talk (Control + Option + J) is a reliable alternative. |
 | JARVIS wakes up when nobody called it | Raise `wake_threshold` to `0.7`. |
-| It cuts me off before I finish | Raise `end_of_speech_silence_ms` to `1000` in `config.yaml`. |
-| The push-to-talk shortcut does nothing | Turn on Terminal under Accessibility and Input Monitoring (see the permissions table above), then restart JARVIS. |
-| "I can't find Claude Code" | Install Claude Code (setup step 2), open a new Terminal window and run `./setup.sh` again. |
-| "Claude Code is installed but not signed in" | Type `claude` in Terminal, sign in, type `/exit`, and try again. |
-| JARVIS says "Sorry, something went wrong" | Ask again. If it keeps happening, look at the end of `logs/jarvis.log`, and check that `claude` works on its own in Terminal. |
-| The voice sounds robotic or different | Kokoro failed to start, so JARVIS fell back to a backup voice. Run `./setup.sh` again. |
-| There's a problem in config.yaml | The message names the setting. Fix the spelling or value, or copy the line back from the original file. |
+| It cuts me off before I've finished | Raise `end_of_speech_silence_ms` to `1000`. |
+| It ignores what I said / acts like it heard nothing | Very short or unclear phrases are thrown away on purpose, because speech recognition sometimes "hears" words in silence. Speak a full sentence. |
+| The push-to-talk shortcut does nothing | Turn on Terminal under **Accessibility** and **Input Monitoring**, then restart JARVIS. |
+| It keeps asking permission for simple things like web searches | The folder isn't trusted yet. In Terminal run `cd ~/jarvis && claude`, choose "Yes, I trust this folder", type `/exit`, then restart JARVIS. |
+| "Terminal wants access to control ..." pop-up | Click **OK**. That's JARVIS controlling an app you asked about. |
+| App control fails, or it says it isn't allowed to control an app | System Settings → Privacy & Security → **Automation** → turn on that app under Terminal (or node). |
+| Web browsing fails | Run `./setup.sh` again (it re-downloads the browser), then run `./doctor.sh`. |
+| "I can't find Claude Code" | Do setup step 2 again, open a new Terminal window, and run `./setup.sh`. |
+| "Claude Code is installed but not signed in" | Type `claude` in Terminal, sign in, type `/exit`, and start JARVIS again. |
+| "Sorry, something went wrong" | Ask again. If it keeps happening, run `./doctor.sh`, and look at the end of `logs/jarvis.log`. |
+| "Claude took too long to answer" | Usually a slow website or a busy service. Ask again. JARVIS reconnects by itself and remembers the conversation. |
+| The voice suddenly sounds different or robotic | The main voice (Kokoro) failed, so JARVIS switched to a backup. Run `./setup.sh` again. |
+| "There's a problem in config.yaml" | The message names the setting. Fix the spelling or value, or copy that line back from GitHub. |
 | Setup stopped while downloading | Check your internet connection and run `./setup.sh` again. It continues where it left off. |
+| A Terminal window opens every time I log in | That's autostart. Turn it off with `~/jarvis/launchd/install-autostart.sh --remove`. |
+
+## Updating and removing
+
+**Update to the latest version:**
+```bash
+cd ~/jarvis && git pull && ./setup.sh
+```
+
+**Remove JARVIS completely:**
+```bash
+~/jarvis/launchd/install-autostart.sh --remove
+```
+Then drag the `jarvis` folder to the Bin. Your memory file is inside that folder, so copy
+`memory/facts.md` somewhere else first if you want to keep it.
 
 ## Logs and privacy
 
-- Every conversation turn and tool call is written to `logs/conversation-YYYY-MM-DD.jsonl`.
-  Technical details go to `logs/jarvis.log`. These files stay on your Mac. Delete them whenever you like.
-- Audio is never saved. Speech recognition, the wake word and the voices all run on your Mac.
-  Only the **text** of your request goes to Claude.
+- Audio is **never saved**. The wake word, speech recognition and voices all run on your Mac.
+  Only the **text** of what you say goes to Claude.
+- Every request, answer, tool use and permission answer is written to
+  `logs/conversation-YYYY-MM-DD.jsonl`. Technical details go to `logs/jarvis.log`. These files stay
+  on your Mac, and you can delete them whenever you like.
+- Web searches go to DuckDuckGo. Websites you ask JARVIS to open see a normal browser visit.
 
-## How it works (for the curious)
+## How it works
 
-`openWakeWord` hears "hey Jarvis". `Silero VAD` notices when you stop talking. `Whisper` turns
-your speech into text (mlx-whisper on Apple Silicon, faster-whisper on Intel). The text goes to one
-long-running `claude -p` process in streaming mode. Each sentence of the reply is spoken by
-`Kokoro` (or Piper, or the Mac's `say` command) as soon as it's complete.
+1. `openWakeWord` hears "hey Jarvis" (or you press the hotkey).
+2. `Silero VAD` notices when you've stopped talking (about 0.7 seconds of silence).
+3. `Whisper` turns your speech into English text: `mlx-whisper` on Apple Silicon, `faster-whisper`
+   (small, int8) on Intel.
+4. The text goes to one long-running `claude -p` process in two-way streaming mode. It runs with all
+   `ANTHROPIC_*` settings removed, so it always uses your subscription.
+5. Each finished sentence of the reply is spoken straight away by `Kokoro` (backups: `Piper`, then macOS `say`).
+6. When Claude needs permission, the request comes back to JARVIS, which asks you out loud and passes on your answer.
+7. Tools come from `.mcp.json`, and the permission rules from `.claude/settings.json`.
 
 ## For developers
 
@@ -139,5 +313,10 @@ uv venv -p 3.12 .venv-test && uv pip install -p .venv-test/bin/python numpy pyya
 ```
 
 The tests need no microphone, speakers, network or models. A fake `claude`
-(`tests/fake_claude.py`) replays recorded stream-json output from `tests/fixtures/`.
-To re-pin dependencies, run `uv lock && uv export --no-hashes --no-dev -o requirements.txt`.
+(`tests/fake_claude.py`) replays real recorded stream-json output from `tests/fixtures/`, including
+permission requests. `bash -n` and `shellcheck` should pass on every script. To re-pin
+dependencies, run `uv lock && uv export --no-hashes --no-dev -o requirements.txt`.
+
+Package layout: `jarvis/audio.py` (mic, speaker, end-of-speech), `wake.py`, `stt.py`, `tts.py`,
+`brain.py` (the `claude` process), `permissions.py` (spoken yes/no), `loop.py` (main loop),
+`config.py`, `logs.py`, `doctor.py` (health check).

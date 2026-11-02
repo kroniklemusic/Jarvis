@@ -150,3 +150,54 @@ def test_barge_in_stops_speech_and_listens_again(make_jarvis):
     speak_request(j)
     assert pump(j, lambda: j.state == LISTENING and j.follow_up)
     assert j.engine.spoken == ["The colour is teal."]
+
+
+def test_spoken_yes_proceed_allows_the_action(make_jarvis):
+    j = make_jarvis("Please create the file.", "Yes, proceed.")
+    j.step(frame("wake"))
+    speak_request(j)
+    assert pump(j, lambda: j.pending is not None and j.pending.listening)
+    assert j.engine.spoken[0].startswith("I'd like to run a command on your Mac to create empty file.")
+    speak_request(j)                                  # user says "yes, proceed"
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)
+    assert "Very good." in j.engine.spoken
+    assert any("finished with no errors" in s for s in j.engine.spoken)
+    kinds = log_kinds(j)
+    assert kinds.index("permission_request") < kinds.index("permission_reply") < kinds.index("permission_answer")
+
+
+def test_spoken_no_denies_the_action(make_jarvis):
+    j = make_jarvis("Please create the file.", "No.")
+    j.step(frame("wake"))
+    speak_request(j)
+    assert pump(j, lambda: j.pending is not None and j.pending.listening)
+    speak_request(j)
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)
+    assert "Understood, I won't do that." in j.engine.spoken
+    assert any("declined" in s for s in j.engine.spoken)
+
+
+def test_unclear_answer_asks_again_then_silence_means_no(make_jarvis, cfg):
+    cfg.confirm_timeout_seconds = 0.5
+    j = make_jarvis("Please create the file.", "Banana.")
+    j.step(frame("wake"))
+    speak_request(j)
+    assert pump(j, lambda: j.pending is not None and j.pending.listening)
+    speak_request(j)                                  # unclear reply
+    assert pump(j, lambda: any("didn't catch that" in s for s in j.engine.spoken))
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)   # then silence -> treated as no
+    assert "I'll take that as a no." in j.engine.spoken
+    assert any("declined" in s for s in j.engine.spoken)
+
+
+def test_wake_word_during_permission_question_denies_it(make_jarvis):
+    j = make_jarvis("Please create the file.", "hello", engine_seconds=0.5)
+    j.step(frame("wake"))
+    speak_request(j)
+    assert pump(j, lambda: j.pending is not None, timeout=5)
+    j.step(frame("wake"))                            # barge-in while the question is being spoken
+    assert j.state == LISTENING and j.pending is None
+    j.engine.seconds = 0
+    speak_request(j)                                  # new request "hello" still works
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)
+    assert "Hello there." in j.engine.spoken

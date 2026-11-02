@@ -12,15 +12,31 @@ from typing import Any, Callable
 import numpy as np
 
 from .audio import Endpointer, play_chime
-from .brain import BrainError, TextDelta, ToolCall, TurnDone
+from .brain import BrainError, PermissionRequest, TextDelta, ToolCall, TurnDone
 from .config import Config, ConfigError, load_config
 from .logs import TurnLogger, setup_logging
+from .permissions import REPROMPT, parse_answer, permission_question
 from .stt import clean_transcript
 from .tts import SentenceSplitter
 
 log = logging.getLogger(__name__)
 
 IDLE, LISTENING, RESPONDING = "idle", "listening", "responding"
+
+
+class PendingPermission:
+    """A permission question waiting for your spoken yes or no."""
+
+    def __init__(self, request: PermissionRequest):
+        self.request = request
+        self.done = threading.Event()
+        self.allowed = False
+        self.listening = False
+        self.attempts = 0
+
+    def resolve(self, allowed: bool) -> None:
+        self.allowed = allowed
+        self.done.set()
 
 
 def say_to_user(msg: str) -> None:
@@ -39,6 +55,8 @@ class Jarvis:
         self.follow_up = False
         self._worker: threading.Thread | None = None
         self._cancel = threading.Event()
+        self.pending: PendingPermission | None = None
+        self._speak_lock = threading.Lock()   # makes "cancel" and "queue a sentence" atomic
 
     # ------------------------------------------------------------- transitions
     def _hotkey_pressed(self) -> bool:
@@ -57,8 +75,12 @@ class Jarvis:
 
     def barge_in(self) -> None:
         """Stop talking right now and listen for a new request."""
-        self._cancel.set()
-        self.speaker.interrupt()
+        with self._speak_lock:
+            self._cancel.set()
+            self.speaker.interrupt()
+        if self.pending:
+            self.pending.resolve(False)
+            self.pending = None
         self.logger.log("barge_in")
         self._go_listening(self.cfg.listen_timeout_seconds)
 
@@ -77,6 +99,12 @@ class Jarvis:
             if woke or self._hotkey_pressed():
                 self.barge_in()
                 return
+            p = self.pending
+            if p and not p.listening and not p.done.is_set() and not self.speaker.is_speaking():
+                p.listening = True
+                self._go_listening(self.cfg.confirm_timeout_seconds)
+                self.ui("Waiting for you to say \"yes, proceed\" or \"no\"...")
+                return
             worker_done = self._worker is None or not self._worker.is_alive()
             if worker_done and not self.speaker.is_speaking():
                 if self.cfg.follow_up_seconds > 0:
@@ -88,6 +116,9 @@ class Jarvis:
 
         # LISTENING
         result = self.endpointer.feed(frame)
+        if self.pending and self.pending.listening:
+            self._permission_listen(result)
+            return
         if result == "timeout":
             if not self.follow_up:
                 self.ui("I didn't hear anything.")
@@ -95,6 +126,29 @@ class Jarvis:
             self.ui("Say \"hey Jarvis\" when you need me.")
         elif result == "done":
             self._handle_utterance(self.endpointer.audio())
+
+    def _permission_listen(self, result: str) -> None:
+        p = self.pending
+        assert p is not None
+        if result not in ("timeout", "done"):
+            return
+        answer = None
+        if result == "done":
+            heard = clean_transcript(self.transcriber.transcribe(self.endpointer.audio()))
+            self.ui(f"You: {heard or '(unclear)'}")
+            answer = parse_answer(heard)
+            self.logger.log("permission_reply", text=heard, understood=answer)
+        self.state = RESPONDING
+        p.listening = False
+        if answer is None:
+            p.attempts += 1
+            if result == "done" and p.attempts < 2:
+                self.speaker.say(REPROMPT)      # ask once more, then listen again
+                return
+            self.speaker.say("I'll take that as a no.")
+            answer = False
+        self.pending = None
+        p.resolve(answer)
 
     def _handle_utterance(self, audio: np.ndarray) -> None:
         raw = self.transcriber.transcribe(audio)
@@ -117,11 +171,12 @@ class Jarvis:
         self._worker.start()
 
     def _speak(self, sentence: str, cancel: threading.Event) -> None:
-        if cancel.is_set() or not sentence:
-            return
+        with self._speak_lock:
+            if cancel.is_set() or not sentence:
+                return
+            self.speaker.say(sentence)
         self.ui(f"JARVIS: {sentence}")
         self.logger.log("spoken", text=sentence)
-        self.speaker.say(sentence)
 
     def _respond(self, text: str, cancel: threading.Event) -> None:
         splitter = SentenceSplitter()
@@ -136,6 +191,13 @@ class Jarvis:
                         spoke_anything = True
                 elif isinstance(ev, ToolCall):
                     self.ui(f"(using {ev.name})")
+                elif isinstance(ev, PermissionRequest):
+                    for s in splitter.flush():
+                        self._speak(s, cancel)
+                    allowed = self._ask_permission(ev, cancel)
+                    self.brain.answer_permission(ev, allowed)
+                    if cancel.is_set():
+                        return
                 elif isinstance(ev, BrainError):
                     self._speak(f"Sorry, something went wrong. {ev.message}", cancel)
                     return
@@ -152,6 +214,20 @@ class Jarvis:
             log.exception("Error while answering")
             self.logger.log("error", message=str(exc))
             self._speak("Sorry, I ran into a problem answering that.", cancel)
+
+    def _ask_permission(self, req: PermissionRequest, cancel: threading.Event) -> bool:
+        """Speak the question, then wait until the main loop hears yes or no."""
+        pending = PendingPermission(req)
+        self._speak(permission_question(req.tool_name, req.input, req.description), cancel)
+        self.pending = pending
+        while not pending.done.wait(0.05):
+            if cancel.is_set():
+                return False
+        if pending.allowed:
+            self._speak("Very good.", cancel)
+        else:
+            self._speak("Understood, I won't do that.", cancel)
+        return pending.allowed
 
     def wait_for_response(self, timeout: float = 10.0) -> None:
         if self._worker:

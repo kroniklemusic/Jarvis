@@ -32,6 +32,7 @@ class Config:
     end_of_speech_silence_ms: int = 700
     listen_timeout_seconds: float = 6.0
     max_request_seconds: float = 30.0
+    confirm_timeout_seconds: float = 15.0
     whisper_model_apple: str = "mlx-community/whisper-large-v3-turbo"
     whisper_model_intel: str = "small"
     claude_command: str = "claude"

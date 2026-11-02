@@ -36,6 +36,7 @@ instructions, then run ./setup.sh again."
 say_ok "Homebrew found"
 
 say_step "Installing helper tools: ffmpeg, portaudio, uv, node (this can take a few minutes)"
+# node provides npx (runs the Mac-control and browser tool servers); uv provides uvx (runs the web-search tool server).
 for pkg in ffmpeg portaudio uv node; do
   if brew list --formula "$pkg" >/dev/null 2>&1; then
     say_ok "$pkg is already installed"
@@ -45,6 +46,13 @@ for pkg in ffmpeg portaudio uv node; do
     say_ok "$pkg installed"
   fi
 done
+
+node_major="$(node --version 2>/dev/null | sed 's/^v//; s/\..*//')"
+if [ -z "$node_major" ] || [ "$node_major" -lt 24 ]; then
+  echo "    Your Node is older than version 24; updating it..."
+  brew upgrade node || brew install node || fail "Could not update Node to version 24 or newer."
+fi
+say_ok "Node $(node --version)"
 
 # --------------------------------------------------------------------------
 say_step "Checking Claude Code"
@@ -82,6 +90,10 @@ uv pip install --python "$VENV/bin/python" -r requirements.txt \
   || fail "Installing Python packages failed. Check your internet connection and run ./setup.sh again."
 say_ok "Python packages installed"
 
+say_step "Installing the web browser JARVIS uses for browsing (Playwright's open-source Firefox)"
+npx -y @playwright/mcp@0.0.84 install-browser firefox \
+  || say_warn "The browser download failed. Web browsing won't work until you run ./setup.sh again."
+
 # --------------------------------------------------------------------------
 say_step "Downloading voice and speech models (first time: a few gigabytes)"
 "$VENV/bin/python" -m jarvis --prepare \
@@ -89,9 +101,42 @@ say_step "Downloading voice and speech models (first time: a few gigabytes)"
 Details are in logs/jarvis.log."
 
 # --------------------------------------------------------------------------
+say_step "Letting Claude Code trust the JARVIS folder (one time only)"
+if "$VENV/bin/python" -c "import sys; from jarvis.doctor import check_trust; sys.exit(0 if check_trust().ok else 1)"; then
+  say_ok "Already trusted"
+else
+  cat <<'MSG'
+    Claude Code is about to open in this window. When it asks whether you trust
+    this folder, choose "Yes, I trust this folder". If it asks about MCP servers,
+    choose to use them. Then type  /exit  and press Return to come back here.
+MSG
+  read -r -p "    Press Return to open Claude Code..." _
+  env -u ANTHROPIC_API_KEY claude || true
+  if "$VENV/bin/python" -c "import sys; from jarvis.doctor import check_trust; sys.exit(0 if check_trust().ok else 1)"; then
+    say_ok "Folder trusted"
+  else
+    say_warn "The folder still isn't trusted. JARVIS will work, but will ask permission more often."
+    say_warn "To fix it later: run  claude  inside the jarvis folder and accept the trust question."
+  fi
+fi
+
+# Keep your personal memory out of git, so it can never be uploaded by accident.
+git update-index --skip-worktree memory/facts.md >/dev/null 2>&1 || true
+
+# --------------------------------------------------------------------------
 if [ -x "$REPO_DIR/doctor.sh" ]; then
   say_step "Running the health check"
   "$REPO_DIR/doctor.sh" || say_warn "The health check found something to fix (see above)."
+fi
+
+# --------------------------------------------------------------------------
+say_step "Start automatically when you log in?"
+if [ -t 0 ]; then
+  read -r -p "    Open JARVIS automatically every time you log in? (y/N) " answer
+  case "$answer" in
+    [Yy]*) "$REPO_DIR/launchd/install-autostart.sh" || say_warn "Autostart could not be turned on." ;;
+    *) say_ok "Not now. You can turn it on later with ./launchd/install-autostart.sh" ;;
+  esac
 fi
 
 cat <<'EOF'
@@ -102,6 +147,8 @@ cat <<'EOF'
  To start JARVIS, type this in Terminal (inside the jarvis folder):
 
      .venv/bin/python -m jarvis
+
+ or double-click  launchd/start-jarvis.command  in Finder.
 
  The first time, macOS will ask to let Terminal use the microphone: click Allow.
  Then say "hey Jarvis" and ask a question. Press Control-C to stop.

@@ -1,0 +1,4 @@
+{"type": "user", "message": {"role": "user", "content": [{"tool_use_id": "toolu_FAKE02", "type": "tool_result", "content": "(Bash completed with no output)", "is_error": false}]}, "session_id": "00000000-0000-4000-8000-000000000001"}
+{"type": "system", "subtype": "status", "status": "requesting"}
+{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "I ran `touch made_by_claude.txt`. It finished with no errors, so the file should now exist in the working directory."}]}, "session_id": "00000000-0000-4000-8000-000000000001"}
+{"type": "result", "subtype": "success", "is_error": false, "result": "I ran `touch made_by_claude.txt`. It finished with no errors, so the file should now exist in the working directory.", "num_turns": 2, "session_id": "00000000-0000-4000-8000-000000000001"}

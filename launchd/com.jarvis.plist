@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template used by install-autostart.sh. __JARVIS_DIR__ is replaced with the
+  real folder when it is installed to ~/Library/LaunchAgents/com.jarvis.plist.
+
+  It opens JARVIS in a Terminal window when you log in. Running inside Terminal
+  means JARVIS uses Terminal's microphone permission, and you can see it and
+  stop it (Control-C or close the window).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.jarvis</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/open</string>
+    <string>-a</string>
+    <string>Terminal</string>
+    <string>__JARVIS_DIR__/launchd/start-jarvis.command</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>__JARVIS_DIR__/logs/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>__JARVIS_DIR__/logs/launchd.log</string>
+</dict>
+</plist>
