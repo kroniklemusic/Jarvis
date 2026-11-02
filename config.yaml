@@ -1,0 +1,60 @@
+# JARVIS settings. Edit this file, save it, then restart JARVIS.
+# Lines starting with "#" are notes and are ignored.
+
+# Which Claude model answers you: "sonnet" (default), "opus" or "haiku".
+model: sonnet
+
+# --- Voice -------------------------------------------------------------
+# JARVIS tries these voice engines in order and uses the first one that works.
+tts_engines: [kokoro, piper, say]
+
+# Kokoro voice (the default engine). British male voices: bm_george, bm_lewis,
+# bm_daniel, bm_fable. British female: bf_emma, bf_isabella, bf_alice, bf_lily.
+kokoro_voice: bm_george
+
+# Piper voice (the backup engine). Downloaded by setup.sh.
+piper_voice: en_GB-alan-medium
+
+# macOS built-in voice (the last resort). See: System Settings > Accessibility > Spoken Content.
+say_voice: Daniel
+
+# Speaking speed. 1.0 is normal, 1.2 is a bit faster.
+speech_speed: 1.0
+
+# --- Listening ---------------------------------------------------------
+# How sure JARVIS must be that it heard "hey Jarvis" (0.0 to 1.0).
+# Raise it (e.g. 0.7) if JARVIS wakes up by accident; lower it (e.g. 0.35) if it ignores you.
+wake_threshold: 0.5
+
+# Push-to-talk keyboard shortcut, used instead of saying "hey Jarvis".
+# Format: <cmd>, <ctrl>, <alt>, <shift> plus a letter, joined with "+".
+hotkey: "<ctrl>+<alt>+j"
+
+# After JARVIS answers, how many seconds it keeps listening for a follow-up
+# question without needing "hey Jarvis" again.
+follow_up_seconds: 8
+
+# How long a pause (in milliseconds) means you have finished speaking.
+end_of_speech_silence_ms: 700
+
+# How long JARVIS waits for you to start talking after "hey Jarvis".
+listen_timeout_seconds: 6
+
+# Longest single request, in seconds.
+max_request_seconds: 30
+
+# --- Speech recognition ------------------------------------------------
+# Model used on Apple Silicon Macs (M1, M2, M3, M4 ...).
+whisper_model_apple: mlx-community/whisper-large-v3-turbo
+# Model used on Intel Macs.
+whisper_model_intel: small
+
+# --- Advanced ----------------------------------------------------------
+# Path to the claude program. Leave as "claude" unless told otherwise.
+claude_command: claude
+# Seconds to wait for Claude to finish one answer before giving up.
+claude_timeout_seconds: 300
+# Folder for conversation logs.
+log_dir: logs
+# Play a short sound when JARVIS starts listening.
+chime: true

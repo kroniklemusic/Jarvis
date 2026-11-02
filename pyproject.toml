@@ -1,0 +1,35 @@
+[project]
+name = "jarvis"
+version = "0.1.0"
+description = "A local voice assistant for macOS that talks to the Claude Code CLI."
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "numpy",
+    "numpy<2 ; platform_machine == 'x86_64'",  # torch 2.2.2 (last Intel-Mac build) needs numpy 1.x
+    "pyyaml",
+    "sounddevice",
+    "openwakeword",
+    "silero-vad",
+    "mlx-whisper ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "faster-whisper ; sys_platform != 'darwin' or platform_machine != 'arm64'",
+    "kokoro",
+    "piper-tts",
+    "pynput",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.uv]
+package = false
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+]
+required-environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
