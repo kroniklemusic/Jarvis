@@ -63,6 +63,20 @@ class Microphone:
             if f is not None:
                 yield f
 
+    def backlog(self) -> int:
+        """How many frames are waiting to be processed (each is 80 ms)."""
+        return self._q.qsize()
+
+    def drop_backlog(self) -> int:
+        """Throw away waiting frames so JARVIS catches up with real time. Returns how many."""
+        dropped = 0
+        try:
+            while True:
+                self._q.get_nowait()
+                dropped += 1
+        except queue.Empty:
+            return dropped
+
     def stop(self) -> None:
         if self._stream is not None:
             self._stream.stop()
@@ -172,18 +186,24 @@ class Endpointer:
       "speaking" – speech in progress
       "done"     – speech ended after enough silence (call audio() to get it)
       "timeout"  – nobody started talking in time
+
+    Background sound (a fan, a TV, an echo) can fool the speech detector into thinking you are
+    still talking. So while you speak it learns how loud your voice is, and any sound much quieter
+    than that (below `quiet_ratio` of your level) counts as silence even if it sounds speech-like.
     """
 
     def __init__(self, vad_prob: Callable[[np.ndarray], float], silence_ms: int = 700,
                  start_timeout_s: float = 6.0, max_seconds: float = 30.0,
-                 threshold: float = 0.5, preroll_ms: int = 300):
+                 threshold: float = 0.5, preroll_ms: int = 300, quiet_ratio: float = 0.15):
         self.vad_prob = vad_prob
         self.silence_samples = int(SAMPLE_RATE * silence_ms / 1000)
         self.start_timeout_samples = int(SAMPLE_RATE * start_timeout_s)
         self.max_samples = int(SAMPLE_RATE * max_seconds)
         self.threshold = threshold
+        self.quiet_ratio = quiet_ratio
         self._preroll: collections.deque[np.ndarray] = collections.deque(
             maxlen=max(1, int(preroll_ms / 1000 / FRAME_SECONDS)))
+        self.stats: dict[str, Any] = {}
         self.reset(start_timeout_s)
 
     def reset(self, start_timeout_s: float | None = None) -> None:
@@ -196,6 +216,8 @@ class Endpointer:
         self._silence = 0
         self._waited = 0
         self._total = 0
+        self._voice_levels: list[float] = []
+        self._quiet_levels: list[float] = []
         reset = getattr(self.vad_prob, "reset", None)
         if callable(reset):
             reset()
@@ -204,19 +226,26 @@ class Endpointer:
     def started(self) -> bool:
         return self._started
 
+    @property
+    def voice_level(self) -> float:
+        """Typical loudness of your voice in this request (75th percentile of speech frames)."""
+        return float(np.percentile(self._voice_levels, 75)) if self._voice_levels else 0.0
+
     def feed(self, frame: np.ndarray) -> str:
         f = int16_to_float(frame) if frame.dtype == np.int16 else frame.astype(np.float32)
         self._pending = np.concatenate([self._pending, f])
-        speech_in_frame = False
+        vad_says_speech = False
         while len(self._pending) >= VAD_CHUNK:
             chunk, self._pending = self._pending[:VAD_CHUNK], self._pending[VAD_CHUNK:]
             if self.vad_prob(chunk) >= self.threshold:
-                speech_in_frame = True
+                vad_says_speech = True
+        level = float(np.sqrt(np.mean(f * f))) if len(f) else 0.0
 
         if not self._started:
             self._preroll.append(f)
-            if speech_in_frame:
+            if vad_says_speech:
                 self._started = True
+                self._voice_levels.append(level)
                 self._chunks.extend(self._preroll)
                 self._total = sum(len(c) for c in self._chunks)
                 return "speaking"
@@ -225,8 +254,21 @@ class Endpointer:
 
         self._chunks.append(f)
         self._total += len(f)
-        self._silence = 0 if speech_in_frame else self._silence + len(f)
-        if self._silence >= self.silence_samples or self._total >= self.max_samples:
+        too_quiet = level < self.quiet_ratio * self.voice_level
+        if vad_says_speech and not too_quiet:
+            self._voice_levels.append(level)
+            self._silence = 0
+        else:
+            self._quiet_levels.append(level)
+            self._silence += len(f)
+        ended_by = ("silence" if self._silence >= self.silence_samples
+                    else "length limit" if self._total >= self.max_samples else None)
+        if ended_by:
+            self.stats = {
+                "seconds": round(self._total / SAMPLE_RATE, 2), "ended_by": ended_by,
+                "voice_level": round(self.voice_level, 4),
+                "background_level": round(float(np.median(self._quiet_levels)), 4) if self._quiet_levels else 0.0,
+            }
             return "done"
         return "speaking"
 

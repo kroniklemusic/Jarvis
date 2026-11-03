@@ -91,7 +91,25 @@ def clean_env(env: dict[str, str] | None = None) -> dict[str, str]:
     return {k: v for k, v in env.items() if not k.upper().startswith("ANTHROPIC_")}
 
 
-def build_command(cfg: Config, resume: str | None = None) -> list[str]:
+MEMORY_FILE = REPO_ROOT / "memory" / "facts.md"
+MEMORY_LIMIT = 8000   # characters; keeps the start-up instructions small
+
+
+def memory_prompt(path: Path = MEMORY_FILE) -> str | None:
+    """Your memory file, handed to Claude at start-up so it needn't spend a step opening it."""
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not text:
+        return None
+    if len(text) > MEMORY_LIMIT:
+        text = text[-MEMORY_LIMIT:]   # keep the newest facts (they are appended at the end)
+    return ("Contents of memory/facts.md when this session started (you don't need to open it to "
+            "answer; open it only to add or change a fact):\n\n" + text)
+
+
+def build_command(cfg: Config, resume: str | None = None, memory_file: Path = MEMORY_FILE) -> list[str]:
     cmd = [
         cfg.claude_command, "-p",
         "--input-format", "stream-json",
@@ -103,6 +121,9 @@ def build_command(cfg: Config, resume: str | None = None) -> list[str]:
         # and JARVIS answers them on stdin after asking you out loud.
         "--permission-prompt-tool", "stdio",
     ]
+    memory = memory_prompt(memory_file)
+    if memory:
+        cmd += ["--append-system-prompt", memory]
     if resume:
         cmd += ["--resume", resume]
     assert "--dangerously-skip-permissions" not in cmd

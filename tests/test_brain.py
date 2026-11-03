@@ -168,3 +168,17 @@ def test_missing_claude_gives_plain_message(cfg):
         assert "can't find the 'claude' program" in str(exc)
     else:
         raise AssertionError("expected RuntimeError")
+
+
+def test_memory_is_handed_to_claude_at_startup(tmp_path):
+    from jarvis.brain import memory_prompt
+
+    facts = tmp_path / "facts.md"
+    facts.write_text("# Facts\n- Sister is called Anna (2026-11-03)\n")
+    cmd = build_command(Config(), memory_file=facts)
+    prompt = cmd[cmd.index("--append-system-prompt") + 1]
+    assert "Sister is called Anna" in prompt and "don't need to open it" in prompt
+    assert build_command(Config(), resume="abc", memory_file=facts)[-2:] == ["--resume", "abc"]
+    assert "--append-system-prompt" not in build_command(Config(), memory_file=tmp_path / "missing.md")
+    facts.write_text("x" * 9000 + "NEWEST")
+    assert memory_prompt(facts).endswith("NEWEST")      # very long files keep the newest facts

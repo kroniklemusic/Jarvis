@@ -150,3 +150,34 @@ def test_speaker_stream_has_a_comfortable_buffer():
 
     SoundDeviceOutput(SD())(np.zeros(10, dtype=np.float32), 24000, threading.Event())
     assert isinstance(opened["latency"], float) and opened["latency"] >= 0.2
+
+
+# ------------------------------------------------------- background noise handling
+def loud(level):
+    return np.full(1280, int(32767 * level), dtype=np.int16)
+
+
+def always_speech(chunk):
+    return 0.9      # a speech detector fooled by background noise
+
+
+def test_quiet_background_noise_does_not_keep_jarvis_listening():
+    ep = Endpointer(always_speech, silence_ms=700, max_seconds=20)
+    for _ in range(10):
+        assert ep.feed(loud(0.3)) == "speaking"          # you, talking
+    results = [ep.feed(loud(0.02)) for _ in range(9)]    # a TV far away, "speech" to the detector
+    assert results[-1] == "done"
+    assert ep.stats["ended_by"] == "silence" and ep.stats["seconds"] < 2
+
+
+def test_loud_continuous_noise_hits_the_length_limit_and_says_so():
+    ep = Endpointer(always_speech, silence_ms=700, max_seconds=2)
+    results = [ep.feed(loud(0.3)) for _ in range(30)]
+    assert "done" in results and ep.stats["ended_by"] == "length limit"
+
+
+def test_soft_but_real_speech_keeps_listening():
+    ep = Endpointer(always_speech, silence_ms=700)
+    for _ in range(10):
+        ep.feed(loud(0.3))
+    assert all(ep.feed(loud(0.08)) == "speaking" for _ in range(15))   # quieter, but clearly you

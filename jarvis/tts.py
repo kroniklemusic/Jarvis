@@ -43,7 +43,7 @@ class SentenceSplitter:
     To start talking sooner, a long FIRST sentence is split at its first comma (or similar)
     once at least `first_clause_words` words have arrived."""
 
-    def __init__(self, first_clause_words: int = 6) -> None:
+    def __init__(self, first_clause_words: int = 4) -> None:
         self._buf = ""
         self._emitted = False
         self.first_clause_words = first_clause_words

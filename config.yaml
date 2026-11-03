@@ -50,7 +50,7 @@ end_of_speech_silence_ms: 700
 listen_timeout_seconds: 6
 
 # Longest single request, in seconds.
-max_request_seconds: 30
+max_request_seconds: 20
 
 # When JARVIS asks "Shall I proceed?", how long it waits for your yes or no.
 # If you say nothing, it takes that as a no.
@@ -71,3 +71,5 @@ claude_timeout_seconds: 300
 log_dir: logs
 # Play a short sound when JARVIS starts listening.
 chime: true
+# After each answer, show a one-line summary of how long each step took.
+show_timings: true

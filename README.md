@@ -204,6 +204,7 @@ explaining it. If you make a typo, JARVIS tells you which line is wrong when it 
 | `end_of_speech_silence_ms` | How long a pause ends your request. Raise it to `1000` if JARVIS cuts you off. |
 | `confirm_timeout_seconds` | How long it waits for "yes, proceed" or "no". |
 | `chime` | `false` turns off the *tink* sound. |
+| `show_timings` | After each answer, show a line like "(timing: understood your words in 0.6s, Claude's first words 1.9s, voice started 0.7s after the text)". `false` hides it. |
 | `kokoro_device` | Where the Kokoro voice runs: `cpu` (the processor, default and recommended), `mps` (the Apple Silicon graphics chip) or `auto` (test both at startup and keep the faster one). |
 | `auto_fast_voice` | If Kokoro is too slow on your Mac, JARVIS uses the faster Piper voice so replies start quickly. Set to `false` to always use Kokoro. |
 
@@ -254,6 +255,7 @@ It checks each of these and tells you how to fix anything that fails:
 | "I can't use the microphone" | Turn on Terminal under System Settings → Privacy & Security → Microphone, then restart JARVIS. |
 | JARVIS never reacts to "hey Jarvis" | Speak clearly at normal volume, about an arm's length away. Check System Settings → Sound → Input shows the right microphone. Lower `wake_threshold` to `0.35`. Push-to-talk (Control + Option + J) is a reliable alternative. |
 | JARVIS wakes up when nobody called it | Raise `wake_threshold` to `0.7`. |
+| It keeps listening long after I've stopped talking | JARVIS ignores sounds much quieter than your voice, but a loud TV or music nearby can still fool it. Move closer to the microphone or turn the noise down. If the timing line says "I kept listening for the full ... s", lower `max_request_seconds` in `config.yaml` (e.g. to `12`). |
 | It cuts me off before I've finished | Raise `end_of_speech_silence_ms` to `1000`. |
 | It ignores what I said / acts like it heard nothing | Very short or unclear phrases are thrown away on purpose, because speech recognition sometimes "hears" words in silence. Speak a full sentence. |
 | The push-to-talk shortcut does nothing | Turn on Terminal under **Accessibility** and **Input Monitoring**, then restart JARVIS. |

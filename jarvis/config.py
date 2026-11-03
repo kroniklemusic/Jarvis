@@ -33,7 +33,7 @@ class Config:
     follow_up_seconds: float = 8.0
     end_of_speech_silence_ms: int = 700
     listen_timeout_seconds: float = 6.0
-    max_request_seconds: float = 30.0
+    max_request_seconds: float = 20.0
     confirm_timeout_seconds: float = 15.0
     whisper_model_apple: str = "mlx-community/whisper-large-v3-turbo"
     whisper_model_intel: str = "small"
@@ -41,6 +41,7 @@ class Config:
     claude_timeout_seconds: float = 300.0
     log_dir: str = "logs"
     chime: bool = True
+    show_timings: bool = True
 
     @property
     def log_path(self) -> Path:

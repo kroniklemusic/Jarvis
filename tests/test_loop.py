@@ -93,7 +93,7 @@ def test_full_turn_wake_listen_answer_follow_up(make_jarvis):
     assert j.engine.spoken == ["Hello there.", "How are you today?"]
     assert "You: Say hello to me." in j.ui_lines
     # the last sentence has no trailing space, so it is spoken when the turn result arrives
-    assert log_kinds(j) == ["wake", "user", "spoken", "assistant", "spoken"]
+    assert log_kinds(j) == ["wake", "user", "spoken", "assistant", "spoken", "turn_timing"]
 
 
 def test_follow_up_needs_no_wake_word_then_times_out(make_jarvis, cfg):
@@ -201,3 +201,24 @@ def test_wake_word_during_permission_question_denies_it(make_jarvis):
     speak_request(j)                                  # new request "hello" still works
     assert pump(j, lambda: j.state == LISTENING and j.follow_up)
     assert "Hello there." in j.engine.spoken
+
+
+def test_timing_summary_after_each_answer(make_jarvis):
+    j = make_jarvis("Say hello.")
+    j.step(frame("wake"))
+    speak_request(j)
+    j.on_voice_timing({"stage": "started_speaking"})
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)
+    lines = [l for l in j.ui_lines if l.startswith("(timing:")]
+    assert len(lines) == 1 and "understood your words" in lines[0] and "Claude's first words" in lines[0]
+    assert "turn_timing" in log_kinds(j)
+
+
+def test_timing_summary_can_be_turned_off(make_jarvis, cfg):
+    cfg.show_timings = False
+    j = make_jarvis("Say hello.")
+    j.step(frame("wake"))
+    speak_request(j)
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)
+    assert not [l for l in j.ui_lines if l.startswith("(timing:")]
+    assert "turn_timing" in log_kinds(j)

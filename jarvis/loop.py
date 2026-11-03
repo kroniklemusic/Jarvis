@@ -7,6 +7,7 @@ import logging
 import shutil
 import sys
 import threading
+import time
 from typing import Any, Callable
 
 import numpy as np
@@ -47,7 +48,8 @@ def say_to_user(msg: str) -> None:
 class Jarvis:
     def __init__(self, cfg: Config, wake: Any, endpointer: Endpointer, transcriber: Any,
                  speaker: Any, brain: Any, logger: TurnLogger, hotkey: Any = None,
-                 chime: Callable[[bool], None] = play_chime, ui: Callable[[str], None] = say_to_user):
+                 chime: Callable[[bool], None] = play_chime, ui: Callable[[str], None] = say_to_user,
+                 clock: Callable[[], float] = time.monotonic):
         self.cfg, self.wake, self.endpointer = cfg, wake, endpointer
         self.transcriber, self.speaker, self.brain = transcriber, speaker, brain
         self.logger, self.hotkey, self.chime, self.ui = logger, hotkey, chime, ui
@@ -56,6 +58,8 @@ class Jarvis:
         self._worker: threading.Thread | None = None
         self._cancel = threading.Event()
         self.pending: PendingPermission | None = None
+        self.clock = clock
+        self.timing: dict[str, Any] = {}      # how long each step of the current turn took
         self._speak_lock = threading.Lock()   # makes "cancel" and "queue a sentence" atomic
 
     # ------------------------------------------------------------- transitions
@@ -107,6 +111,7 @@ class Jarvis:
                 return
             worker_done = self._worker is None or not self._worker.is_alive()
             if worker_done and not self.speaker.is_speaking():
+                self._report_timing()
                 if self.cfg.follow_up_seconds > 0:
                     self._go_listening(self.cfg.follow_up_seconds, follow_up=True)
                 else:
@@ -151,7 +156,10 @@ class Jarvis:
         p.resolve(answer)
 
     def _handle_utterance(self, audio: np.ndarray) -> None:
+        started = self.clock()
         raw = self.transcriber.transcribe(audio)
+        self.timing = {"heard_at": started, "transcribe_s": self.clock() - started,
+                       **getattr(self.endpointer, "stats", {})}
         text = clean_transcript(raw)
         if text is None:
             self.logger.log("dropped_transcript", text=raw)
@@ -175,6 +183,7 @@ class Jarvis:
             if cancel.is_set() or not sentence:
                 return
             self.speaker.say(sentence)
+            self.timing.setdefault("first_text_at", self.clock())
         self.ui(f"JARVIS: {sentence}")
         self.logger.log("spoken", text=sentence)
 
@@ -228,6 +237,36 @@ class Jarvis:
         else:
             self._speak("Understood, I won't do that.", cancel)
         return pending.allowed
+
+    # ----------------------------------------------------------------- timing
+    def on_voice_timing(self, info: dict) -> None:
+        """Called by the Speaker; notes when the first sentence of this answer started playing."""
+        if info.get("stage") == "started_speaking" and "first_text_at" in self.timing:
+            self.timing.setdefault("voice_at", self.clock())
+
+    def _report_timing(self) -> None:
+        t, self.timing = self.timing, {}
+        if "heard_at" not in t or "first_text_at" not in t:
+            return
+        after_transcribe = t["heard_at"] + t["transcribe_s"]
+        parts = {
+            "you_spoke_s": t.get("seconds"),
+            "transcribe_s": t["transcribe_s"],
+            "claude_s": t["first_text_at"] - after_transcribe,
+            "voice_s": (t["voice_at"] - t["first_text_at"]) if "voice_at" in t else None,
+        }
+        rounded = {k: round(v, 2) for k, v in parts.items() if v is not None}
+        self.logger.log("turn_timing", **rounded, ended_by=t.get("ended_by"),
+                        voice_level=t.get("voice_level"), background_level=t.get("background_level"))
+        if not self.cfg.show_timings:
+            return
+        line = f"(timing: understood your words in {parts['transcribe_s']:.1f}s"
+        line += f", Claude's first words {parts['claude_s']:.1f}s"
+        if parts["voice_s"] is not None:
+            line += f", voice started {parts['voice_s']:.1f}s after the text"
+        if t.get("ended_by") == "length limit":
+            line += f" - I kept listening for the full {t.get('seconds', 0):.0f}s; background noise may be fooling me"
+        self.ui(line + ")")
 
     def wait_for_response(self, timeout: float = 10.0) -> None:
         if self._worker:
@@ -320,12 +359,23 @@ def _run(cfg: Config, wake: Any, vad: Any, transcriber: Any, speaker: Any) -> in
         return 1
 
     jarvis = Jarvis(cfg, wake, endpointer, transcriber, speaker, brain, logger, hotkey)
+    voice_log = speaker.on_timing
+
+    def on_timing(info: dict) -> None:
+        if voice_log:
+            voice_log(info)
+        jarvis.on_voice_timing(info)
+    speaker.on_timing = on_timing
     speaker.say("At your service.")
     say_to_user(f"\nJARVIS is ready. Say \"hey Jarvis\" or press {hotkey_label(cfg.hotkey)}. "
                 "Press Control-C to quit.\n")
     try:
         for frame in mic.frames():
             jarvis.step(frame)
+            if jarvis.state == IDLE and mic.backlog() > 12:     # more than ~1 s behind real time
+                dropped = mic.drop_backlog()
+                log.warning("Fell %.1f s behind the microphone; skipped ahead", dropped * 0.08)
+                logger.log("mic_backlog_dropped", frames=dropped)
     except KeyboardInterrupt:
         say_to_user("\nGoodbye.")
     finally:
