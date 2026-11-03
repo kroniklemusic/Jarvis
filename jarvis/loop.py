@@ -358,6 +358,9 @@ def _load_everything(cfg: Config, chip: str, prepare_only: bool):  # pragma: no 
 
     say_to_user("  3/4  Speech recognition")
     transcriber = load_transcriber(cfg.whisper_model_apple, cfg.whisper_model_intel, chip)
+    model_name = getattr(transcriber, "model", None)
+    if chip == "apple" and model_name and model_name != cfg.whisper_model_apple:
+        say_to_user(f"  (Couldn't load {cfg.whisper_model_apple}; using {model_name} instead.)")
 
     say_to_user("  4/4  Voice")
     if prepare_only and "piper" in cfg.tts_engines:
@@ -387,7 +390,7 @@ def _warm_up_listening(transcriber: Any, engines: list, chip: str) -> float | No
     Warming up on silence leaves most of the one-time setup to your first real request; a real
     sentence gets it all done at startup, and tells us how fast recognition is on this Mac."""
     from .audio import resample
-    from .stt import mac_memory_gb, timed_transcription
+    from .stt import mac_memory_gb, swap_used_gb, timed_transcription
 
     voice = next((e for e in engines if hasattr(e, "synthesize")), None)
     if voice is None:
@@ -397,11 +400,16 @@ def _warm_up_listening(transcriber: Any, engines: list, chip: str) -> float | No
     text, seconds = timed_transcription(transcriber, audio)
     log.info("Warm-up transcription took %.2fs: %r", seconds, text)
     say_to_user(f"  Speech recognition test: understood a sample sentence in {seconds:.1f}s")
+    memory, swapped = mac_memory_gb(), swap_used_gb()
+    if memory:
+        line = f"  This Mac has {memory:.0f} GB of memory"
+        if swapped and swapped >= 0.5:
+            line += (f"; {swapped:.1f} GB has overflowed to the disk, which slows everything down."
+                     " Quitting other apps (especially web browsers) helps")
+        say_to_user(line + ".")
     if seconds > SLOW_TRANSCRIPTION_S:
-        memory = mac_memory_gb() if chip == "apple" else None
-        note = f" This Mac has {memory:.0f} GB of memory." if memory else ""
-        say_to_user("  That's slower than it should be, so replies will be slow." + note +
-                    " Quitting other apps (especially web browsers) usually helps.")
+        say_to_user("  Speech recognition is slower than it should be, so replies will be slow."
+                    " Quitting other apps usually helps.")
     return seconds
 
 

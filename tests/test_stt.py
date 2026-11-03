@@ -68,3 +68,41 @@ def test_mac_memory_gb():
     def missing(*a, **k):
         raise FileNotFoundError
     assert mac_memory_gb(missing) is None
+
+
+def test_apple_uses_the_configured_model_and_falls_back_if_it_fails():
+    from jarvis.stt import APPLE_FALLBACK_MODEL, load_transcriber
+
+    made = []
+
+    def make(model):
+        made.append(model)
+        if model == "missing/model":
+            raise OSError("404 not found")
+        return MlxWhisper(model, mlx_module=FakeMlxWhisper())
+
+    t = load_transcriber("mlx-community/whisper-small-mlx", "small", "apple", make_apple=make)
+    assert t.model == "mlx-community/whisper-small-mlx" and made == ["mlx-community/whisper-small-mlx"]
+    t = load_transcriber("missing/model", "small", "apple", make_apple=make)
+    assert t.model == APPLE_FALLBACK_MODEL
+
+
+def test_intel_uses_faster_whisper_model():
+    from jarvis.stt import load_transcriber
+
+    t = load_transcriber("x", "small", "intel", make_intel=lambda m: ("faster", m))
+    assert t == ("faster", "small")
+
+
+def test_swap_used_gb():
+    from jarvis.stt import swap_used_gb
+
+    out = "total = 3072.00M  used = 1536.00M  free = 1536.00M  (encrypted)\n"
+    assert swap_used_gb(lambda *a, **k: subprocess.CompletedProcess(a, 0, out, "")) == 1.5
+    out = "total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)\n"
+    assert swap_used_gb(lambda *a, **k: subprocess.CompletedProcess(a, 0, out, "")) == 0.0
+
+
+def test_default_apple_model_is_the_small_one():
+    from jarvis.config import Config
+    assert Config().whisper_model_apple == "mlx-community/whisper-small-mlx"

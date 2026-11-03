@@ -58,7 +58,10 @@ confirm_timeout_seconds: 15
 
 # --- Speech recognition ------------------------------------------------
 # Model used on Apple Silicon Macs (M1, M2, M3, M4 ...).
-whisper_model_apple: mlx-community/whisper-large-v3-turbo
+#   mlx-community/whisper-small-mlx      fast, recommended (about 0.5 GB of memory)
+#   mlx-community/whisper-large-v3-turbo more accurate, but needs a Mac with 16 GB of memory or more
+# After changing it, run ./setup.sh once to download the new model.
+whisper_model_apple: mlx-community/whisper-small-mlx
 # Model used on Intel Macs.
 whisper_model_intel: small
 

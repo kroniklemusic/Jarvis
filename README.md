@@ -268,6 +268,7 @@ It checks each of these and tells you how to fix anything that fails:
 | "Claude Code is installed but not signed in" | Type `claude` in Terminal, sign in, type `/exit`, and start JARVIS again. |
 | "Sorry, something went wrong" | Ask again. If it keeps happening, run `./doctor.sh`, and look at the end of `logs/jarvis.log`. |
 | "Claude took too long to answer" | Usually a slow website or a busy service. Ask again. JARVIS reconnects by itself and remembers the conversation. |
+| The timing line says "understood your words" took many seconds | Speech recognition is struggling, usually because the Mac is short of memory. Check the startup line "This Mac has ... GB of memory": if it mentions memory overflowing to the disk, quit other apps (especially web browsers). Keep `whisper_model_apple` on the small model unless your Mac has 16 GB or more. |
 | JARVIS takes several seconds to start speaking, or the speech sounds choppy | Run `./doctor.sh --voice`. It times each voice on your Mac, plays three test sentences, and prints the results in plain English. If Kokoro is "too slow", set `tts_engines: [piper, kokoro, say]` in `config.yaml` to use the faster Piper voice. |
 | The voice suddenly sounds different or robotic | The main voice (Kokoro) failed, so JARVIS switched to a backup. Run `./setup.sh` again. |
 | "There's a problem in config.yaml" | The message names the setting. Fix the spelling or value, or copy that line back from GitHub. |

@@ -115,10 +115,39 @@ def mac_memory_gb(run: Callable[..., subprocess.CompletedProcess] = subprocess.r
         return None
 
 
-def load_transcriber(apple_model: str, intel_model: str, chip: str | None = None) -> Transcriber:
+# Known-good model used if the configured Apple Silicon model can't be downloaded or loaded.
+APPLE_FALLBACK_MODEL = "mlx-community/whisper-large-v3-turbo"
+
+
+def load_transcriber(apple_model: str, intel_model: str, chip: str | None = None,
+                     make_apple: Callable[[str], Transcriber] | None = None,
+                     make_intel: Callable[[str], Transcriber] | None = None) -> Transcriber:
     chip = chip or detect_chip()
-    if chip == "apple":
-        log.info("Speech recognition: mlx-whisper (%s)", apple_model)
-        return MlxWhisper(apple_model)
-    log.info("Speech recognition: faster-whisper (%s, int8)", intel_model)
-    return FasterWhisper(intel_model)
+    if chip != "apple":
+        log.info("Speech recognition: faster-whisper (%s, int8)", intel_model)
+        return (make_intel or FasterWhisper)(intel_model)
+    make_apple = make_apple or MlxWhisper
+    candidates = [apple_model] + ([APPLE_FALLBACK_MODEL] if apple_model != APPLE_FALLBACK_MODEL else [])
+    last_error: BaseException | None = None
+    for model in candidates:
+        try:
+            transcriber = make_apple(model)
+            log.info("Speech recognition: mlx-whisper (%s)", model)
+            return transcriber
+        except (Exception, SystemExit) as exc:
+            log.warning("Speech recognition model %s could not load: %s", model, exc)
+            last_error = exc
+    raise RuntimeError(f"No speech recognition model could load ({last_error})")
+
+
+def swap_used_gb(run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> float | None:
+    """How much memory macOS has moved to disk because it ran out (GB), or None if unknown."""
+    try:
+        out = run(["sysctl", "-n", "vm.swapusage"], capture_output=True, text=True, timeout=5).stdout
+        m = re.search(r"used\s*=\s*([\d.]+)([MG])", out)
+        if not m:
+            return None
+        value = float(m.group(1))
+        return value / 1024 if m.group(2) == "M" else value
+    except Exception:
+        return None
