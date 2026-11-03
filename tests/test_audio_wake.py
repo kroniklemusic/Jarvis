@@ -137,3 +137,16 @@ def test_stop_discards_buffered_audio_and_stream_restarts_next_time():
     stop.clear()
     out(np.zeros(1200, dtype=np.float32), 24000, stop)
     assert s.active and s.written == 1200 and len(sd.opened) == 1
+
+
+def test_speaker_stream_has_a_comfortable_buffer():
+    """A tiny buffer made speech choppy whenever the next sentence was being prepared."""
+    opened = {}
+
+    class SD:
+        def OutputStream(self, **kw):
+            opened.update(kw)
+            return FakeStream(**kw)
+
+    SoundDeviceOutput(SD())(np.zeros(10, dtype=np.float32), 24000, threading.Event())
+    assert isinstance(opened["latency"], float) and opened["latency"] >= 0.2

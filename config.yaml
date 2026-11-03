@@ -25,9 +25,10 @@ speech_speed: 1.0
 # automatically use the faster Piper voice instead. Set to false to always use Kokoro.
 auto_fast_voice: true
 
-# Where the Kokoro voice runs: "auto" (try the Apple Silicon graphics chip and the processor,
-# keep whichever is faster), "mps" (graphics chip only) or "cpu" (processor only).
-kokoro_device: auto
+# Where the Kokoro voice runs: "cpu" (the processor - recommended), "mps" (the Apple Silicon
+# graphics chip, which can be slow to start each new sentence) or "auto" (test both at startup
+# and keep the faster one).
+kokoro_device: cpu
 
 # --- Listening ---------------------------------------------------------
 # How sure JARVIS must be that it heard "hey Jarvis" (0.0 to 1.0).

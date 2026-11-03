@@ -94,7 +94,8 @@ class SoundDeviceOutput:
     Opening a new stream for every sentence adds a pause each time on macOS, so the stream stays
     open and is only reopened if the sample rate changes (e.g. switching from Kokoro to Piper)."""
 
-    BLOCK_SECONDS = 0.05
+    BLOCK_SECONDS = 0.1      # how much audio is handed over per write
+    BUFFER_SECONDS = 0.25    # how much the sound card keeps queued, so other work never causes gaps
 
     def __init__(self, sd_module: Any = None):
         self._sd = sd_module
@@ -108,7 +109,8 @@ class SoundDeviceOutput:
         if self._stream is not None and self._rate == rate:
             return self._stream
         self.close()
-        self._stream = self._sd.OutputStream(samplerate=rate, channels=1, dtype="float32", latency="low")
+        self._stream = self._sd.OutputStream(samplerate=rate, channels=1, dtype="float32",
+                                             latency=self.BUFFER_SECONDS)
         self._rate = rate
         return self._stream
 

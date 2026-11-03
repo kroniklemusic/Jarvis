@@ -81,7 +81,7 @@ def check_trust(claude_json: Path | None = None, repo: Path = REPO_ROOT) -> Chec
     return Check("JARVIS folder trusted by Claude Code", trusted,
                  "" if trusted else "Until you trust the folder, Claude asks permission even for safe, read-only actions.",
                  f"In Terminal run:  cd \"{repo}\" && claude   then choose 'Yes, I trust this folder', and type /exit.",
-                 warning=True)
+                 warning=not trusted)
 
 
 def check_microphone(record: Callable[[], float] | None = None) -> Check:
@@ -167,10 +167,12 @@ def check_mcp_servers(repo: Path = REPO_ROOT, timeout: float = 120.0) -> list[Ch
 
 def check_voice(speak: Callable[[], str] | None = None) -> Check:
     def _speak() -> str:
+        from .logs import stderr_to_file
         from .tts import Speaker, load_engines
 
         cfg = load_config()
-        engines = load_engines(cfg.tts_engines, cfg, notify=print)
+        with stderr_to_file(cfg.log_path / "jarvis.log"):   # keep library warnings off the screen
+            engines = load_engines(cfg.tts_engines, cfg, notify=print)
         if not engines:
             raise RuntimeError("no voice engine could load")
         speaker = Speaker(engines)

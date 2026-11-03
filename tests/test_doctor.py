@@ -21,7 +21,8 @@ def test_trust_check(tmp_path):
     repo = tmp_path / "jarvis"
     assert not doctor.check_trust(cj, repo).ok                       # file missing
     cj.write_text(json.dumps({"projects": {str(repo): {"hasTrustDialogAccepted": True}}}))
-    assert doctor.check_trust(cj, repo).ok
+    trusted = doctor.check_trust(cj, repo)
+    assert trusted.ok and not trusted.warning        # no "How to fix" note when all is well
     cj.write_text(json.dumps({"projects": {str(repo): {"hasTrustDialogAccepted": False}}}))
     c = doctor.check_trust(cj, repo)
     assert not c.ok and "trust" in c.fix

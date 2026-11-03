@@ -169,13 +169,16 @@ class SayTTS:
                 self._proc.terminate()
 
 
-SPEED_TEST_TEXT = "Certainly. I'll take care of that for you right away, and let you know when it's done."
+# Different lengths on purpose: some devices (the Apple graphics chip) are only slow the first time
+# they see a sentence of a new length, and real replies are always new lengths.
+SPEED_TEST_TEXTS = ("Certainly. I'll take care of that for you right away.",
+                    "The weather tomorrow looks mild, with light rain arriving in the late afternoon.")
 
 
 def speed_ratio(engine: Any, clock: Callable[[], float] = time.monotonic) -> float:
     """Seconds of work per second of speech. 0.2 means 5x faster than real time; above 1 is too slow."""
     t0 = clock()
-    seconds = sum(len(a) / sr for a, sr in engine.synthesize(SPEED_TEST_TEXT))
+    seconds = sum(len(a) / sr for text in SPEED_TEST_TEXTS for a, sr in engine.synthesize(text))
     return (clock() - t0) / seconds if seconds else float("inf")
 
 

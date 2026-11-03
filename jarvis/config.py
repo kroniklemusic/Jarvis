@@ -27,7 +27,7 @@ class Config:
     say_voice: str = "Daniel"
     speech_speed: float = 1.0
     auto_fast_voice: bool = True
-    kokoro_device: str = "auto"
+    kokoro_device: str = "cpu"
     wake_threshold: float = 0.5
     hotkey: str = "<ctrl>+<alt>+j"
     follow_up_seconds: float = 8.0

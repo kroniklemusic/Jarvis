@@ -262,11 +262,11 @@ def test_kokoro_devices_to_try():
 
 def test_kokoro_picks_the_faster_device():
     speeds = {"mps": 0.08, "cpu": 0.6}
-    k = load_kokoro(Config(), "apple", make=FakeKokoro, mps_available=lambda: True,
+    k = load_kokoro(Config(kokoro_device="auto"), "apple", make=FakeKokoro, mps_available=lambda: True,
                     measure=lambda e: speeds[e.device])
     assert k.device == "mps" and k.measured_ratio == 0.08
     speeds = {"mps": 0.9, "cpu": 0.3}
-    k = load_kokoro(Config(), "apple", make=FakeKokoro, mps_available=lambda: True,
+    k = load_kokoro(Config(kokoro_device="auto"), "apple", make=FakeKokoro, mps_available=lambda: True,
                     measure=lambda e: speeds[e.device])
     assert k.device == "cpu"
 
@@ -276,9 +276,9 @@ def test_kokoro_skips_a_device_that_fails_or_gives_bad_audio():
         if device == "mps":
             return FakeKokoro(device, audio=np.full(100, np.nan, dtype=np.float32))
         return FakeKokoro(device)
-    k = load_kokoro(Config(), "apple", make=make, mps_available=lambda: True, measure=lambda e: 0.4)
+    k = load_kokoro(Config(kokoro_device="auto"), "apple", make=make, mps_available=lambda: True, measure=lambda e: 0.4)
     assert k.device == "cpu"
-    k = load_kokoro(Config(), "apple", make=lambda d: FakeKokoro(d, fail=(d == "mps")),
+    k = load_kokoro(Config(kokoro_device="auto"), "apple", make=lambda d: FakeKokoro(d, fail=(d == "mps")),
                     mps_available=lambda: True, measure=lambda e: 0.4)
     assert k.device == "cpu"
 
@@ -323,3 +323,23 @@ def test_a_voice_that_calls_sys_exit_does_not_kill_jarvis(monkeypatch):
     monkeypatch.setattr(tts, "load_kokoro", exits)
     engines = tts.load_engines(["kokoro", "say"], Config(), chip="apple")
     assert [e.name for e in engines] == ["say"]
+
+
+def test_speed_test_uses_several_new_sentences():
+    from jarvis.tts import SPEED_TEST_TEXTS, speed_ratio
+
+    seen = []
+
+    class Engine:
+        def synthesize(self, text):
+            seen.append(text)
+            yield np.zeros(1000), 1000
+
+    ticks = iter([0.0, 0.5])
+    ratio = speed_ratio(Engine(), clock=lambda: next(ticks))
+    assert seen == list(SPEED_TEST_TEXTS) and len(set(seen)) >= 2
+    assert ratio == 0.5 / len(SPEED_TEST_TEXTS)
+
+
+def test_default_voice_device_is_the_processor():
+    assert Config().kokoro_device == "cpu"
