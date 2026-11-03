@@ -256,6 +256,7 @@ It checks each of these and tells you how to fix anything that fails:
 | JARVIS never reacts to "hey Jarvis" | Speak clearly at normal volume, about an arm's length away. Check System Settings → Sound → Input shows the right microphone. Lower `wake_threshold` to `0.35`. Push-to-talk (Control + Option + J) is a reliable alternative. |
 | JARVIS wakes up when nobody called it | Raise `wake_threshold` to `0.7`. |
 | It keeps listening long after I've stopped talking | JARVIS ignores sounds much quieter than your voice, but a loud TV or music nearby can still fool it. Move closer to the microphone or turn the noise down. If the timing line says "I kept listening for the full ... s", lower `max_request_seconds` in `config.yaml` (e.g. to `12`). |
+| JARVIS "hears" words you never said right after it speaks | It may be hearing the end of its own voice through the speakers. It now waits 0.8 seconds after speaking before it listens. If it still happens, turn the speaker volume down a little or use headphones. |
 | It cuts me off before I've finished | Raise `end_of_speech_silence_ms` to `1000`. |
 | It ignores what I said / acts like it heard nothing | Very short or unclear phrases are thrown away on purpose, because speech recognition sometimes "hears" words in silence. Speak a full sentence. |
 | The push-to-talk shortcut does nothing | Turn on Terminal under **Accessibility** and **Input Monitoring**, then restart JARVIS. |

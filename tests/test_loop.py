@@ -1,6 +1,8 @@
 import json
 import time
 
+import numpy as np
+
 import pytest
 
 from jarvis.audio import Endpointer
@@ -222,3 +224,37 @@ def test_timing_summary_can_be_turned_off(make_jarvis, cfg):
     assert pump(j, lambda: j.state == LISTENING and j.follow_up)
     assert not [l for l in j.ui_lines if l.startswith("(timing:")]
     assert "turn_timing" in log_kinds(j)
+
+
+def test_jarvis_waits_for_its_own_voice_to_die_away_before_listening(make_jarvis, cfg):
+    cfg.echo_guard_seconds = 0.6
+    j = make_jarvis("Say hello.")
+    j.step(frame("wake"))
+    speak_request(j)
+    assert wait_for(lambda: j.speaker.is_speaking() or j.engine.spoken, 3)
+    assert j.speaker.wait(3)
+    j.step(frame())
+    assert j.state == RESPONDING                         # sound only just stopped: not listening yet
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up, timeout=3)
+    assert j.speaker.quiet_for() >= 0.6
+
+
+def test_room_loudness_measured_while_idle_is_used_for_the_next_request(make_jarvis):
+    j = make_jarvis("Say hello.")
+    room = np.full(1280, int(32767 * 0.05), dtype=np.int16)
+    for _ in range(20):
+        j.step(room)
+    j.step(frame("wake"))
+    assert j.state == LISTENING
+    assert abs(j.endpointer.noise_floor - 0.05) < 0.005
+
+
+def test_timing_line_explains_why_listening_stopped_and_lag(make_jarvis):
+    j = make_jarvis("Say hello.")
+    j.step(frame("wake"))
+    j.note_backlog(25)                                   # 2 s behind the microphone
+    speak_request(j)
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)
+    line = next(l for l in j.ui_lines if l.startswith("(timing:"))
+    assert "stopped after a pause" in line and "recorded" in line
+    assert "running 2.0s behind the microphone" in line

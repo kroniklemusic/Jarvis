@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import logging
 import shutil
 import sys
@@ -60,6 +61,9 @@ class Jarvis:
         self.pending: PendingPermission | None = None
         self.clock = clock
         self.timing: dict[str, Any] = {}      # how long each step of the current turn took
+        self._room: collections.deque[float] = collections.deque(maxlen=60)   # ~5 s of idle loudness
+        self._max_backlog = 0
+        self._listen_step_s: list[float] = []
         self._speak_lock = threading.Lock()   # makes "cancel" and "queue a sentence" atomic
 
     # ------------------------------------------------------------- transitions
@@ -72,7 +76,7 @@ class Jarvis:
 
     def _go_listening(self, timeout_s: float, follow_up: bool = False) -> None:
         self.state, self.follow_up = LISTENING, follow_up
-        self.endpointer.reset(timeout_s)
+        self.endpointer.reset(timeout_s, noise_floor=self.room_level())
         if not follow_up:
             self.chime(self.cfg.chime)
         self.ui("Listening for a follow-up..." if follow_up else "Listening...")
@@ -88,10 +92,36 @@ class Jarvis:
         self.logger.log("barge_in")
         self._go_listening(self.cfg.listen_timeout_seconds)
 
+    def room_level(self) -> float | None:
+        """Background loudness of the room, measured while JARVIS was idle (None if not known yet)."""
+        if len(self._room) < 10:
+            return None
+        return float(np.percentile(self._room, 30))
+
+    def _speaker_quiet(self) -> bool:
+        quiet_for = getattr(self.speaker, "quiet_for", None)
+        if quiet_for is None:
+            return not self.speaker.is_speaking()
+        return quiet_for() >= self.cfg.echo_guard_seconds
+
+    def note_backlog(self, frames: int) -> None:
+        """How far behind the microphone JARVIS is (called by the main loop)."""
+        self._max_backlog = max(self._max_backlog, frames)
+
     # -------------------------------------------------------------------- step
     def step(self, frame: np.ndarray) -> None:
         """Process one 80 ms microphone frame."""
+        if self.state == LISTENING:
+            started = self.clock()
+            self._step(frame)
+            self._listen_step_s.append(self.clock() - started)
+        else:
+            self._step(frame)
+
+    def _step(self, frame: np.ndarray) -> None:
         if self.state == IDLE:
+            f = frame.astype(np.float32) / 32768.0 if frame.dtype == np.int16 else frame
+            self._room.append(float(np.sqrt(np.mean(f * f))) if len(f) else 0.0)
             woke = self.wake.process(frame)
             if woke or self._hotkey_pressed():
                 self.logger.log("wake", source="wake_word" if woke else "hotkey")
@@ -104,13 +134,13 @@ class Jarvis:
                 self.barge_in()
                 return
             p = self.pending
-            if p and not p.listening and not p.done.is_set() and not self.speaker.is_speaking():
+            if p and not p.listening and not p.done.is_set() and self._speaker_quiet():
                 p.listening = True
                 self._go_listening(self.cfg.confirm_timeout_seconds)
                 self.ui("Waiting for you to say \"yes, proceed\" or \"no\"...")
                 return
             worker_done = self._worker is None or not self._worker.is_alive()
-            if worker_done and not self.speaker.is_speaking():
+            if worker_done and self._speaker_quiet():
                 self._report_timing()
                 if self.cfg.follow_up_seconds > 0:
                     self._go_listening(self.cfg.follow_up_seconds, follow_up=True)
@@ -255,17 +285,28 @@ class Jarvis:
             "claude_s": t["first_text_at"] - after_transcribe,
             "voice_s": (t["voice_at"] - t["first_text_at"]) if "voice_at" in t else None,
         }
+        behind_s = self._max_backlog * 0.08
+        steps, self._listen_step_s, self._max_backlog = self._listen_step_s, [], 0
+        slowest_ms = max(steps) * 1000 if steps else 0.0
         rounded = {k: round(v, 2) for k, v in parts.items() if v is not None}
         self.logger.log("turn_timing", **rounded, ended_by=t.get("ended_by"),
-                        voice_level=t.get("voice_level"), background_level=t.get("background_level"))
+                        voice_level=t.get("voice_level"), background_level=t.get("background_level"),
+                        room_level=t.get("room_level"), behind_s=round(behind_s, 2),
+                        slowest_listen_step_ms=round(slowest_ms, 1))
         if not self.cfg.show_timings:
             return
-        line = f"(timing: understood your words in {parts['transcribe_s']:.1f}s"
+        line = "(timing: "
+        if t.get("seconds") is not None:
+            why = "after a pause" if t.get("ended_by") == "silence" else "at the time limit"
+            line += f"recorded {t['seconds']:.1f}s, stopped {why}; "
+        line += f"understood your words in {parts['transcribe_s']:.1f}s"
         line += f", Claude's first words {parts['claude_s']:.1f}s"
         if parts["voice_s"] is not None:
             line += f", voice started {parts['voice_s']:.1f}s after the text"
         if t.get("ended_by") == "length limit":
-            line += f" - I kept listening for the full {t.get('seconds', 0):.0f}s; background noise may be fooling me"
+            line += " - background noise kept me listening"
+        if behind_s >= 0.5:
+            line += f" - note: I was running {behind_s:.1f}s behind the microphone"
         self.ui(line + ")")
 
     def wait_for_response(self, timeout: float = 10.0) -> None:
@@ -371,6 +412,7 @@ def _run(cfg: Config, wake: Any, vad: Any, transcriber: Any, speaker: Any) -> in
                 "Press Control-C to quit.\n")
     try:
         for frame in mic.frames():
+            jarvis.note_backlog(mic.backlog())
             jarvis.step(frame)
             if jarvis.state == IDLE and mic.backlog() > 12:     # more than ~1 s behind real time
                 dropped = mic.drop_backlog()

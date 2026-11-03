@@ -68,7 +68,7 @@ def fake_command_builder(cfg, resume=None):
 
 @pytest.fixture
 def cfg(tmp_path):
-    return Config(log_dir=str(tmp_path / "logs"), claude_timeout_seconds=10, chime=False)
+    return Config(log_dir=str(tmp_path / "logs"), claude_timeout_seconds=10, chime=False, echo_guard_seconds=0.05)
 
 
 def wait_for(cond, timeout=5.0):

@@ -365,3 +365,14 @@ def test_a_broken_timing_callback_never_stops_speech():
     s = Speaker([engine], RecordingPlayer(), on_timing=broken)
     s.say("Still spoken.")
     assert s.wait(2) and engine.built == ["Still spoken."]
+
+
+def test_quiet_for_counts_from_when_the_sound_stopped():
+    s = Speaker([FakeSynthEngine(audio_s=0.2)], RecordingPlayer())
+    assert s.quiet_for() > 1000                          # never spoken yet
+    s.say("Hello.")
+    assert wait_for(s.is_speaking) and s.quiet_for() == 0.0
+    assert s.wait(2)
+    first = s.quiet_for()
+    time.sleep(0.15)
+    assert 0.0 <= first < 0.15 and s.quiet_for() >= 0.15

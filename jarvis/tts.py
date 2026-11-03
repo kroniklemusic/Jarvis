@@ -320,6 +320,7 @@ class Speaker:
         self._audio_q: queue.Queue = queue.Queue()
         self._generation = 0
         self._pending = 0                  # sentences queued but not yet fully spoken
+        self._last_sound_end = float("-inf")
         self._lock = threading.Lock()
         self._threads = [threading.Thread(target=self._build_loop, name="voice-builder", daemon=True),
                          threading.Thread(target=self._play_loop, name="voice-player", daemon=True)]
@@ -355,6 +356,15 @@ class Speaker:
     def is_speaking(self) -> bool:
         return self._pending > 0
 
+    def quiet_for(self) -> float:
+        """Seconds since JARVIS last finished speaking (0 while speaking).
+
+        The sound card still plays the last fraction of a second after the final write, and the room
+        echoes it, so the microphone should wait a moment before listening again."""
+        if self.is_speaking():
+            return 0.0
+        return self.clock() - self._last_sound_end
+
     def wait(self, timeout: float | None = None) -> bool:
         """Wait until everything queued has been spoken."""
         deadline = None if timeout is None else time.monotonic() + timeout
@@ -383,6 +393,7 @@ class Speaker:
 
     def _finish_sentence(self, gen: int) -> None:
         with self._lock:
+            self._last_sound_end = self.clock()
             if self._current(gen) and self._pending > 0:
                 self._pending -= 1
 

@@ -181,3 +181,30 @@ def test_soft_but_real_speech_keeps_listening():
     for _ in range(10):
         ep.feed(loud(0.3))
     assert all(ep.feed(loud(0.08)) == "speaking" for _ in range(15))   # quieter, but clearly you
+
+
+def test_tv_as_loud_as_a_quiet_voice_is_ignored_once_the_room_is_known():
+    ep = Endpointer(always_speech, silence_ms=700, start_timeout_s=1.0)
+    ep.reset(1.0, noise_floor=0.1)                       # measured while JARVIS was idle
+    assert ep.feed(loud(0.1)) == "waiting"               # the TV alone doesn't start a request
+    for _ in range(10):
+        assert ep.feed(loud(0.4)) == "speaking"          # you
+    results = [ep.feed(loud(0.1)) for _ in range(9)]     # back to just the TV
+    assert results[-1] == "done" and ep.stats["ended_by"] == "silence"
+    assert ep.stats["room_level"] == 0.1
+
+
+def test_room_level_is_measured_while_waiting_when_not_known():
+    """If JARVIS hasn't measured the room yet, quieter sound heard while waiting is used instead."""
+    ep = Endpointer(fake_vad, silence_ms=700, start_timeout_s=5.0)
+    assert all(ep.feed(loud(0.05)) == "waiting" for _ in range(6))   # a hum the detector ignores
+    assert abs(ep.room_level - 0.05) < 0.005
+    assert ep.feed(loud(0.4)) == "speaking"
+
+
+def test_quiet_room_behaves_as_before():
+    ep = Endpointer(fake_vad, silence_ms=700)
+    ep.reset(5.0, noise_floor=0.0)
+    assert ep.feed(frame("speech")) == "speaking"
+    results = [ep.feed(frame()) for _ in range(9)]
+    assert results[-1] == "done"

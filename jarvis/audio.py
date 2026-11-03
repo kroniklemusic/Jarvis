@@ -194,21 +194,27 @@ class Endpointer:
 
     def __init__(self, vad_prob: Callable[[np.ndarray], float], silence_ms: int = 700,
                  start_timeout_s: float = 6.0, max_seconds: float = 30.0,
-                 threshold: float = 0.5, preroll_ms: int = 300, quiet_ratio: float = 0.15):
+                 threshold: float = 0.5, preroll_ms: int = 300, quiet_ratio: float = 0.15,
+                 room_margin: float = 2.5):
         self.vad_prob = vad_prob
         self.silence_samples = int(SAMPLE_RATE * silence_ms / 1000)
         self.start_timeout_samples = int(SAMPLE_RATE * start_timeout_s)
         self.max_samples = int(SAMPLE_RATE * max_seconds)
         self.threshold = threshold
         self.quiet_ratio = quiet_ratio
+        self.room_margin = room_margin     # your voice must be this many times louder than the room
+        self.noise_floor: float | None = None
         self._preroll: collections.deque[np.ndarray] = collections.deque(
             maxlen=max(1, int(preroll_ms / 1000 / FRAME_SECONDS)))
         self.stats: dict[str, Any] = {}
         self.reset(start_timeout_s)
 
-    def reset(self, start_timeout_s: float | None = None) -> None:
+    def reset(self, start_timeout_s: float | None = None, noise_floor: float | None = None) -> None:
+        """Start a new request. noise_floor is the room's background loudness, if already known."""
         if start_timeout_s is not None:
             self.start_timeout_samples = int(SAMPLE_RATE * start_timeout_s)
+        self.noise_floor = noise_floor
+        self._waiting_levels: list[float] = []
         self._pending = np.zeros(0, dtype=np.float32)
         self._chunks: list[np.ndarray] = []
         self._preroll.clear()
@@ -227,6 +233,15 @@ class Endpointer:
         return self._started
 
     @property
+    def room_level(self) -> float:
+        """The room's background loudness: given at reset, or measured while waiting for you."""
+        if self.noise_floor is not None:
+            return self.noise_floor
+        if len(self._waiting_levels) >= 5:
+            return float(np.percentile(self._waiting_levels, 30))
+        return 0.0
+
+    @property
     def voice_level(self) -> float:
         """Typical loudness of your voice in this request (75th percentile of speech frames)."""
         return float(np.percentile(self._voice_levels, 75)) if self._voice_levels else 0.0
@@ -241,9 +256,11 @@ class Endpointer:
                 vad_says_speech = True
         level = float(np.sqrt(np.mean(f * f))) if len(f) else 0.0
 
+        loud_enough = level >= self.room_margin * self.room_level
         if not self._started:
             self._preroll.append(f)
-            if vad_says_speech:
+            self._waiting_levels.append(level)
+            if vad_says_speech and loud_enough:
                 self._started = True
                 self._voice_levels.append(level)
                 self._chunks.extend(self._preroll)
@@ -254,7 +271,7 @@ class Endpointer:
 
         self._chunks.append(f)
         self._total += len(f)
-        too_quiet = level < self.quiet_ratio * self.voice_level
+        too_quiet = level < self.quiet_ratio * self.voice_level or not loud_enough
         if vad_says_speech and not too_quiet:
             self._voice_levels.append(level)
             self._silence = 0
@@ -268,6 +285,7 @@ class Endpointer:
                 "seconds": round(self._total / SAMPLE_RATE, 2), "ended_by": ended_by,
                 "voice_level": round(self.voice_level, 4),
                 "background_level": round(float(np.median(self._quiet_levels)), 4) if self._quiet_levels else 0.0,
+                "room_level": round(self.room_level, 4),
             }
             return "done"
         return "speaking"

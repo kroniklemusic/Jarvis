@@ -42,6 +42,7 @@ class Config:
     log_dir: str = "logs"
     chime: bool = True
     show_timings: bool = True
+    echo_guard_seconds: float = 0.8   # wait this long after JARVIS stops talking before listening
 
     @property
     def log_path(self) -> Path:
