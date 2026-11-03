@@ -258,3 +258,93 @@ def test_timing_line_explains_why_listening_stopped_and_lag(make_jarvis):
     line = next(l for l in j.ui_lines if l.startswith("(timing:"))
     assert "stopped after a pause" in line and "recorded" in line
     assert "running 2.0s behind the microphone" in line
+
+
+# ------------------------------------------------------------------- HUD wiring
+@pytest.fixture
+def hud_jarvis(make_jarvis):
+    from jarvis.hud.bus import EventBus
+
+    def _make(*texts, **kw):
+        bus = EventBus()
+        j = make_jarvis(*texts, **kw)
+        j.events, j.commands = bus.publish, bus.next_command
+        j.bus = bus
+        j.q, _ = bus.subscribe()
+        return j
+    return _make
+
+
+def drain(q):
+    out = []
+    while not q.empty():
+        out.append(q.get_nowait())
+    return out
+
+
+def test_hud_receives_state_changes_and_conversation(hud_jarvis):
+    j = hud_jarvis("Read the note please.")
+    j.step(frame())
+    j.step(frame("wake"))
+    speak_request(j)
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)
+    events = drain(j.q)
+    states = [e["data"]["state"] for e in events if e["kind"] == "state"]
+    assert states[0] == "standby" and "listening" in states and states[-1] == "listening"
+    assert "thinking" in states or "speaking" in states
+    kinds = [e["kind"] for e in events]
+    assert "heard" in kinds and "said" in kinds and "tool" in kinds and "level" in kinds and "timing" in kinds
+    tool = next(e for e in events if e["kind"] == "tool")
+    assert tool["data"] == {"name": "Read", "label": "Read"}
+
+
+def test_talk_button_works_like_the_wake_word(hud_jarvis):
+    j = hud_jarvis("hello")
+    j.bus.command("talk")
+    j.step(frame())
+    assert j.state == LISTENING
+
+
+def test_stop_button_cancels_and_goes_to_standby(hud_jarvis):
+    j = hud_jarvis("Say hello.", engine_seconds=1.0)
+    j.step(frame("wake"))
+    speak_request(j)
+    assert wait_for(j.speaker.is_speaking)
+    j.bus.command("stop")
+    j.step(frame())
+    assert j.state == IDLE
+    assert wait_for(lambda: not j.speaker.is_speaking(), 2) and j.engine.spoken == []
+    assert "stopped_from_hud" in log_kinds(j)
+
+
+def test_authorise_button_answers_a_permission_question(hud_jarvis):
+    j = hud_jarvis("Please create the file.")
+    j.step(frame("wake"))
+    speak_request(j)
+    assert pump(j, lambda: j.pending is not None and j.pending.listening)
+    events = drain(j.q)
+    perm = next(e for e in events if e["kind"] == "permission")
+    assert "Shall I proceed" in perm["data"]["question"]
+    assert any(e["kind"] == "state" and e["data"]["state"] == "confirm" for e in events)
+    j.bus.command("yes")
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)
+    assert "Very good." in j.engine.spoken
+    assert any("finished with no errors" in s for s in j.engine.spoken)
+    assert any(e["kind"] == "permission_done" and e["data"]["allowed"] for e in drain(j.q))
+
+
+def test_deny_button(hud_jarvis):
+    j = hud_jarvis("Please create the file.")
+    j.step(frame("wake"))
+    speak_request(j)
+    assert pump(j, lambda: j.pending is not None)
+    j.bus.command("no")
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)
+    assert any("declined" in s for s in j.engine.spoken)
+
+
+def test_tool_labels():
+    from jarvis.loop import tool_label
+    assert tool_label("mcp__duckduckgo__search") == "DuckDuckGo: search"
+    assert tool_label("mcp__playwright__browser_click") == "Browser: click"
+    assert tool_label("Bash") == "Bash"

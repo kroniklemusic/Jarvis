@@ -4,6 +4,7 @@ import os
 import plistlib
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -90,8 +91,7 @@ def test_install_and_remove_autostart(fake_mac):
     created = not venv_py.exists()
     if created:
         venv_py.parent.mkdir(parents=True, exist_ok=True)
-        venv_py.write_text("#!/bin/sh\n")
-        venv_py.chmod(0o755)
+        venv_py.symlink_to(sys.executable)
     try:
         r = subprocess.run(["bash", str(ROOT / "launchd" / "install-autostart.sh")], env=env,
                            capture_output=True, text=True)
@@ -112,6 +112,73 @@ def test_install_and_remove_autostart(fake_mac):
 
 
 def test_scripts_pass_bash_syntax_check():
-    for script in ["setup.sh", "doctor.sh", "launchd/install-autostart.sh", "launchd/start-jarvis.command"]:
+    for script in ["setup.sh", "doctor.sh", "launchd/install-autostart.sh", "launchd/start-jarvis.command",
+                   "app/build-app.sh"]:
         assert subprocess.run(["bash", "-n", str(ROOT / script)]).returncode == 0, script
         assert os.access(ROOT / script, os.X_OK), f"{script} is not executable"
+
+
+def test_autostart_opens_the_app_once_it_is_built(fake_mac):
+    tmp, home, env = fake_mac
+    app = tmp / "Applications" / "JARVIS.app"
+    app.mkdir(parents=True)
+    build = ROOT / "build"
+    build.mkdir(exist_ok=True)
+    marker = build / "installed-path"
+    venv_py = ROOT / ".venv" / "bin" / "python"
+    created = not venv_py.exists()
+    if created:
+        venv_py.parent.mkdir(parents=True, exist_ok=True)
+        venv_py.symlink_to(sys.executable)
+    marker.write_text(str(app) + "\n")
+    try:
+        r = subprocess.run(["bash", str(ROOT / "launchd" / "install-autostart.sh")], env=env,
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "the JARVIS app opens when you log in" in r.stdout
+        plist = plistlib.loads((home / "Library" / "LaunchAgents" / "com.jarvis.plist").read_bytes())
+        assert plist["ProgramArguments"] == ["/usr/bin/open", str(app)]
+    finally:
+        marker.unlink()
+        if created:
+            import shutil
+            shutil.rmtree(ROOT / ".venv")
+
+
+def test_app_settings_file():
+    info = plistlib.loads((ROOT / "app" / "Info.plist").read_bytes())
+    assert info["CFBundleExecutable"] == "JARVIS" and info["CFBundleIconFile"] == "AppIcon"
+    assert "hey Jarvis" in info["NSMicrophoneUsageDescription"]
+    assert info["NSAppleEventsUsageDescription"]
+    assert info["NSAppTransportSecurity"]["NSAllowsLocalNetworking"] is True
+    assert info["JARVISRepoPath"] == "__JARVIS_DIR__"
+    assert info["LSMinimumSystemVersion"] == "13.0"
+
+
+def test_swift_app_and_python_agree_on_their_messages():
+    swift = (ROOT / "app" / "main.swift").read_text()
+    loop = (ROOT / "jarvis" / "loop.py").read_text()
+    for marker in ("JARVIS_HUD_URL=", "JARVIS_FATAL="):
+        assert marker in swift and marker in loop
+    assert '"-m jarvis --app"' in swift or "-m jarvis --app" in swift
+    assert '"--app"' in loop
+    assert "ANTHROPIC_" in swift                     # the app also strips API keys
+    assert "127.0.0.1" in swift and "127.0.0.1" in (ROOT / "jarvis" / "hud" / "server.py").read_text()
+
+
+def test_app_icon_renders():
+    import numpy as np
+
+    from jarvis.hud.icon import render, write_png
+
+    img = render(128)
+    assert img.shape == (128, 128, 4)
+    assert img[0, 0, 3] == 0.0 and img[-1, -1, 3] == 0.0          # transparent corners
+    assert img[64, 64, 3] == 1.0 and img[64, 64, :3].mean() > 0.6  # bright, solid centre
+    out = ROOT / "build" / "test-icon.png"
+    out.parent.mkdir(exist_ok=True)
+    write_png(out, img)
+    data = out.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) > 1000
+    out.unlink()
+    assert np.isfinite(img).all()

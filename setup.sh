@@ -140,6 +140,15 @@ if [ -x "$REPO_DIR/doctor.sh" ]; then
 fi
 
 # --------------------------------------------------------------------------
+say_step "Building the JARVIS app"
+APP_BUILT=0
+if "$REPO_DIR/app/build-app.sh"; then
+  APP_BUILT=1
+else
+  say_warn "The app couldn't be built (see above). You can still start JARVIS from Terminal."
+fi
+
+# --------------------------------------------------------------------------
 say_step "Start automatically when you log in?"
 if [ -t 0 ]; then
   read -r -p "    Open JARVIS automatically every time you log in? (y/N) " answer
@@ -149,18 +158,32 @@ if [ -t 0 ]; then
   esac
 fi
 
-cat <<'EOF'
+if [ "$APP_BUILT" = 1 ]; then
+  cat <<'DONE'
 
 ==========================================================================
  Setup finished.
+
+ Open JARVIS like any other app: press Command-Space, type JARVIS, and press
+ Return. It's also in your Applications folder and Launchpad. To keep it in
+ the Dock, right-click its Dock icon > Options > Keep in Dock.
+
+ The first time, macOS asks to let JARVIS use the microphone: click Allow.
+ Then say "hey Jarvis", or press Space in the JARVIS window. Quit with Command-Q.
+==========================================================================
+DONE
+else
+  cat <<'DONE'
+
+==========================================================================
+ Setup finished (without the app).
 
  To start JARVIS, type this in Terminal (inside the jarvis folder):
 
      .venv/bin/python -m jarvis
 
- or double-click  launchd/start-jarvis.command  in Finder.
-
  The first time, macOS will ask to let Terminal use the microphone: click Allow.
  Then say "hey Jarvis" and ask a question. Press Control-C to stop.
 ==========================================================================
-EOF
+DONE
+fi

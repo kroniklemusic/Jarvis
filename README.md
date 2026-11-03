@@ -73,20 +73,48 @@ Setup takes 15 to 40 minutes the first time, mostly downloading. It will:
 - **open Claude Code once** so you can trust the JARVIS folder. When asked, choose
   **"Yes, I trust this folder"**, then type `/exit`;
 - run the [health check](#health-check). You'll hear a test sentence;
+- build the **JARVIS app** and put it in your Applications folder (this uses Apple's free
+  command line tools, which you already have if `git` works);
 - ask whether JARVIS should start automatically at login.
 
 You can run `./setup.sh` again at any time. It skips whatever is already done.
 
 ## Daily use
 
-**Start JARVIS.** Do either of these:
-- In Finder, open the `jarvis` folder, then the `launchd` folder, and double-click **start-jarvis.command**; or
-- in Terminal:
-  ```bash
-  cd ~/jarvis && .venv/bin/python -m jarvis
-  ```
+**Start JARVIS.** Open the **JARVIS** app like any other app: press Command + Space, type `JARVIS`,
+and press Return. It's also in your Applications folder and Launchpad. To keep it in the Dock,
+right-click its Dock icon, then choose **Options → Keep in Dock**.
 
-Startup takes 10 to 30 seconds. It's ready when you hear **"At your service."**
+The JARVIS window shows a boot screen while it loads (10 to 30 seconds). It's ready when you hear
+**"At your service."**
+
+**Quit JARVIS:** press **Command + Q**, or close the window.
+
+### The JARVIS display
+
+![The JARVIS display](docs/hud.png)
+
+- **The arc reactor** in the middle shows what JARVIS is doing, and moves with your voice and its own:
+  - blue and calm means **Standing By**;
+  - bright blue means **Listening**;
+  - amber and spinning means **Processing**;
+  - pulsing means **Responding**;
+  - red means it's waiting for your **authorisation**.
+- **Comms Log** (left) is the conversation, plus each tool JARVIS uses.
+- **Systems** (right) shows the time, which Claude model and voice are in use, how busy your Mac is,
+  and a status light for each part of JARVIS.
+- **Buttons** along the bottom:
+  - **Talk** (or press **Space**) works like saying "hey Jarvis";
+  - **Stop** (or press **Esc**) cancels whatever JARVIS is doing;
+  - **Latency** shows how long the last answer took at each step.
+- When JARVIS needs your OK, an **Authorisation Required** panel appears. Click **Authorise** or
+  **Deny**, press **Y** or **N**, or just say "yes, proceed" or "no".
+
+**Without the app:** you can also run JARVIS in Terminal, with plain text instead of the display:
+```bash
+cd ~/jarvis && .venv/bin/python -m jarvis
+```
+Stop it with Control + C.
 
 **Talk to it:**
 - Say **"hey Jarvis"**. A soft *tink* means it's listening. Ask your question normally.
@@ -94,8 +122,6 @@ Startup takes 10 to 30 seconds. It's ready when you hear **"At your service."**
 - **Follow-ups:** for 8 seconds after it finishes, just keep talking. No need to say "hey Jarvis" again.
 - **Interrupt:** say "hey Jarvis" while it's talking. It stops at once and listens.
 - **Push-to-talk:** press **Control + Option + J** instead of saying "hey Jarvis".
-
-**Stop JARVIS:** click its Terminal window and press **Control + C**, or just close the window.
 
 Try saying:
 - "Hey Jarvis, what's the weather in London tomorrow?"
@@ -149,8 +175,9 @@ To turn it **on** (setup also offers to do this):
 ```bash
 ~/jarvis/launchd/install-autostart.sh
 ```
-After that, each time you log in a Terminal window opens with JARVIS running in it. Close the
-window or press Control + C to stop it for this session.
+After that, the JARVIS app opens each time you log in. Quit it with Command + Q to stop it for this
+session. If the app hasn't been built, a Terminal window running JARVIS opens instead. If you build
+the app later, run the command above again so autostart opens the app.
 
 To turn it **off**:
 ```bash
@@ -164,16 +191,19 @@ If you clicked "Don't Allow" by mistake, you can turn it back on yourself:
 
 | Permission | Why JARVIS needs it | Where to turn it on |
 |---|---|---|
-| **Microphone** | To hear you | System Settings → Privacy & Security → **Microphone** → turn on **Terminal** |
-| **Automation** | To control apps (Mail, Calendar, Safari, ...) | System Settings → Privacy & Security → **Automation** → find **Terminal** (or **node**) → turn on each app you want JARVIS to control |
-| **Accessibility** | For the push-to-talk shortcut, and for some app controls | System Settings → Privacy & Security → **Accessibility** → turn on **Terminal** |
-| **Input Monitoring** | For the push-to-talk shortcut on some macOS versions | System Settings → Privacy & Security → **Input Monitoring** → turn on **Terminal** |
+| **Microphone** | To hear you | System Settings → Privacy & Security → **Microphone** → turn on **JARVIS** |
+| **Automation** | To control apps (Mail, Calendar, Safari, ...) | System Settings → Privacy & Security → **Automation** → find **JARVIS** → turn on each app you want JARVIS to control |
+| **Accessibility** | For the Control + Option + J shortcut, and for some app controls | System Settings → Privacy & Security → **Accessibility** → turn on **JARVIS** |
+| **Input Monitoring** | For the Control + Option + J shortcut on some macOS versions | System Settings → Privacy & Security → **Input Monitoring** → turn on **JARVIS** |
 
-After changing a permission, stop JARVIS and start it again. If you use iTerm or another terminal
-app instead of Terminal, give the permissions to that app instead.
+After changing a permission, quit JARVIS (Command + Q) and open it again.
+If you run JARVIS from Terminal instead of the app, give these permissions to **Terminal** (or to
+iTerm, or whichever terminal app you use).
 
-The first time JARVIS controls a new app, macOS shows "Terminal wants access to control *App*".
+The first time JARVIS controls a new app, macOS shows "JARVIS wants access to control *App*".
 Click **OK**. If you click "Don't Allow", turn it on again under **Automation**, as in the table.
+
+The Space-bar Talk button inside the JARVIS window needs none of these. It always works.
 
 ## Changing settings
 
@@ -220,8 +250,9 @@ default because it needs a one-time Google setup, which takes about 15 minutes:
    your email, and under **Test users** add your own Gmail address.
 4. Open **APIs & Services → Credentials → Create credentials → OAuth client ID**. Choose
    **Desktop app** as the type, then click Create. Keep the **Client ID** and **Client secret** handy.
-5. In Terminal, run `open -e ~/.zshrc` and add these two lines at the bottom, with your own values
-   between the quotes. Then save and close the file.
+5. In Terminal, run `touch ~/.zprofile && open -e ~/.zprofile` and add these two lines at the bottom,
+   with your own values between the quotes. Then save and close the file. The JARVIS app reads this
+   file when it starts.
    ```
    export GOOGLE_OAUTH_CLIENT_ID="paste-client-id-here"
    export GOOGLE_OAUTH_CLIENT_SECRET="paste-client-secret-here"
@@ -229,7 +260,7 @@ default because it needs a one-time Google setup, which takes about 15 minutes:
 6. Open `.claude/settings.json` in the `jarvis` folder with TextEdit. It's hidden, so in Finder press
    Command + Shift + . to show hidden files. Move `"google-workspace"` from the
    `disabledMcpjsonServers` list to the `enabledMcpjsonServers` list.
-7. Open a new Terminal window and start JARVIS. The first time you ask about email or your calendar,
+7. Quit JARVIS (Command + Q) and open it again. The first time you ask about email or your calendar,
    a browser window opens so you can sign in to Google and allow access.
 
 JARVIS asks your permission ("Shall I proceed?") before **every** Google Workspace action, including reading.
@@ -252,17 +283,21 @@ It checks each of these and tells you how to fix anything that fails:
 
 | What you see or hear | What to do |
 |---|---|
-| "I can't use the microphone" | Turn on Terminal under System Settings → Privacy & Security → Microphone, then restart JARVIS. |
+| "I can't use the microphone" | Turn on **JARVIS** (or Terminal, if you run it from Terminal) under System Settings → Privacy & Security → Microphone, then quit and reopen JARVIS. |
+| JARVIS doesn't appear in Applications / setup says "The app couldn't be built" | Install Apple's command line tools with `xcode-select --install`, then run `./app/build-app.sh`. Until then, start JARVIS from Terminal with `.venv/bin/python -m jarvis`. |
+| The JARVIS window says "JARVIS can't continue" | The message says what's wrong. Click **Open Logs Folder** for details (`app.log` and `jarvis.log`), or run `./doctor.sh`. |
+| The JARVIS window stays on "Starting engine" | Wait up to a minute the first time. If it never changes, quit, then run `./doctor.sh` in Terminal. |
+| The display looks frozen or blank | Press **Command + R** (View → Reload Interface). JARVIS keeps running underneath. |
 | JARVIS never reacts to "hey Jarvis" | Speak clearly at normal volume, about an arm's length away. Check System Settings → Sound → Input shows the right microphone. Lower `wake_threshold` to `0.35`. Push-to-talk (Control + Option + J) is a reliable alternative. |
 | JARVIS wakes up when nobody called it | Raise `wake_threshold` to `0.7`. |
 | It keeps listening long after I've stopped talking | JARVIS ignores sounds much quieter than your voice, but a loud TV or music nearby can still fool it. Move closer to the microphone or turn the noise down. If the timing line says "I kept listening for the full ... s", lower `max_request_seconds` in `config.yaml` (e.g. to `12`). |
 | JARVIS "hears" words you never said right after it speaks | It may be hearing the end of its own voice through the speakers. It now waits 0.8 seconds after speaking before it listens. If it still happens, turn the speaker volume down a little or use headphones. |
 | It cuts me off before I've finished | Raise `end_of_speech_silence_ms` to `1000`. |
 | It ignores what I said / acts like it heard nothing | Very short or unclear phrases are thrown away on purpose, because speech recognition sometimes "hears" words in silence. Speak a full sentence. |
-| The push-to-talk shortcut does nothing | Turn on Terminal under **Accessibility** and **Input Monitoring**, then restart JARVIS. |
+| The push-to-talk shortcut does nothing | Turn on **JARVIS** under **Accessibility** and **Input Monitoring**, then quit and reopen JARVIS. The Space bar in the JARVIS window always works. |
 | It keeps asking permission for simple things like web searches | The folder isn't trusted yet. In Terminal run `cd ~/jarvis && claude`, choose "Yes, I trust this folder", type `/exit`, then restart JARVIS. |
-| "Terminal wants access to control ..." pop-up | Click **OK**. That's JARVIS controlling an app you asked about. |
-| App control fails, or it says it isn't allowed to control an app | System Settings → Privacy & Security → **Automation** → turn on that app under Terminal (or node). |
+| "JARVIS wants access to control ..." pop-up | Click **OK**. That's JARVIS controlling an app you asked about. |
+| App control fails, or it says it isn't allowed to control an app | System Settings → Privacy & Security → **Automation** → turn on that app under JARVIS (or Terminal / node). |
 | Web browsing fails | Run `./setup.sh` again (it re-downloads the browser), then run `./doctor.sh`. |
 | "I can't find Claude Code" | Do setup step 2 again, open a new Terminal window, and run `./setup.sh`. |
 | "Claude Code is installed but not signed in" | Type `claude` in Terminal, sign in, type `/exit`, and start JARVIS again. |
@@ -273,7 +308,7 @@ It checks each of these and tells you how to fix anything that fails:
 | The voice suddenly sounds different or robotic | The main voice (Kokoro) failed, so JARVIS switched to a backup. Run `./setup.sh` again. |
 | "There's a problem in config.yaml" | The message names the setting. Fix the spelling or value, or copy that line back from GitHub. |
 | Setup stopped while downloading | Check your internet connection and run `./setup.sh` again. It continues where it left off. |
-| A Terminal window opens every time I log in | That's autostart. Turn it off with `~/jarvis/launchd/install-autostart.sh --remove`. |
+| JARVIS (or a Terminal window) opens every time I log in | That's autostart. Turn it off with `~/jarvis/launchd/install-autostart.sh --remove`. |
 
 ## Updating and removing
 
@@ -286,7 +321,7 @@ cd ~/jarvis && git pull && ./setup.sh
 ```bash
 ~/jarvis/launchd/install-autostart.sh --remove
 ```
-Then drag the `jarvis` folder to the Bin. Your memory file is inside that folder, so copy
+Then drag **JARVIS** from your Applications folder to the Bin, and drag the `jarvis` folder to the Bin. Your memory file is inside that folder, so copy
 `memory/facts.md` somewhere else first if you want to keep it.
 
 ## Logs and privacy
@@ -309,6 +344,9 @@ Then drag the `jarvis` folder to the Bin. Your memory file is inside that folder
 5. Each finished sentence of the reply is spoken straight away by `Kokoro` (backups: `Piper`, then macOS `say`).
 6. When Claude needs permission, the request comes back to JARVIS, which asks you out loud and passes on your answer.
 7. Tools come from `.mcp.json`, and the permission rules from `.claude/settings.json`.
+8. **JARVIS.app** is a small native Mac program (`app/main.swift`). It starts all of the above and
+   shows the display. The display is a web page (`jarvis/hud/static/`) served only to this Mac by
+   JARVIS. Its live feed and buttons are protected by a random password that changes every launch.
 
 ## For developers
 
@@ -326,4 +364,10 @@ dependencies, run `uv lock && uv export --no-hashes --no-dev -o requirements.txt
 
 Package layout: `jarvis/audio.py` (mic, speaker, end-of-speech), `wake.py`, `stt.py`, `tts.py`,
 `brain.py` (the `claude` process), `permissions.py` (spoken yes/no), `loop.py` (main loop),
-`config.py`, `logs.py`, `doctor.py` (health check).
+`config.py`, `logs.py`, `doctor.py` (health check), `hud/` (display: event bus, local server, web
+page, app icon). The app shell is `app/main.swift`, built by `app/build-app.sh`.
+
+To preview the display without JARVIS running, open `jarvis/hud/static/index.html?demo=1` in a
+browser. Add `&scene=listening`, `thinking`, `speaking`, `confirm` or `boot` to freeze one state.
+To run JARVIS with the display in your web browser instead of the app, use
+`.venv/bin/python -m jarvis --app --browser`.

@@ -39,12 +39,29 @@ chmod +x "$JARVIS_DIR/launchd/start-jarvis.command"
 mkdir -p "$AGENTS_DIR" "$JARVIS_DIR/logs"
 sed "s|__JARVIS_DIR__|$JARVIS_DIR|g" "$TEMPLATE" > "$TARGET"
 
+# If JARVIS.app has been built, open the app at login instead of a Terminal window.
+STARTS="JARVIS in a Terminal window"
+APP_PATH=""
+[ -f "$JARVIS_DIR/build/installed-path" ] && APP_PATH="$(cat "$JARVIS_DIR/build/installed-path")"
+if [ -n "$APP_PATH" ] && [ -d "$APP_PATH" ]; then
+  "$JARVIS_DIR/.venv/bin/python" - "$TARGET" "$APP_PATH" <<'PY'
+import plistlib, sys
+path, app = sys.argv[1], sys.argv[2]
+with open(path, "rb") as f:
+    plist = plistlib.load(f)
+plist["ProgramArguments"] = ["/usr/bin/open", app]
+with open(path, "wb") as f:
+    plistlib.dump(plist, f)
+PY
+  STARTS="the JARVIS app"
+fi
+
 launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
 if ! launchctl bootstrap "$DOMAIN" "$TARGET"; then
   echo "macOS refused to register the autostart. Try logging out and in, then run this again."
   exit 1
 fi
 
-echo "Autostart is ON. From now on JARVIS opens in a Terminal window when you log in."
+echo "Autostart is ON. From now on $STARTS opens when you log in."
 echo "(It may have just opened one now, too.)"
 echo "To turn it off:  ./launchd/install-autostart.sh --remove"

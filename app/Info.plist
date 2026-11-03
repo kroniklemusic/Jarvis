@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template used by app/build-app.sh. __JARVIS_DIR__ is replaced with the jarvis folder. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>JARVIS</string>
+  <key>CFBundleDisplayName</key>
+  <string>JARVIS</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.jarvis.assistant</string>
+  <key>CFBundleExecutable</key>
+  <string>JARVIS</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.productivity</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>Your personal assistant, powered by Claude Code.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>JARVIS listens for "hey Jarvis" and your requests. Audio is processed on this Mac and never saved.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>JARVIS controls apps such as Mail, Calendar and Safari when you ask it to. It always asks you first.</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+  <key>JARVISRepoPath</key>
+  <string>__JARVIS_DIR__</string>
+</dict>
+</plist>

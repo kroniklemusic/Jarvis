@@ -26,6 +26,16 @@ log = logging.getLogger(__name__)
 IDLE, LISTENING, RESPONDING = "idle", "listening", "responding"
 
 
+def tool_label(name: str) -> str:
+    """'mcp__duckduckgo__search' -> 'DuckDuckGo: search'; 'Bash' -> 'Bash'."""
+    if not name.startswith("mcp__"):
+        return name
+    _, server, tool = (name.split("__", 2) + ["", ""])[:3]
+    server = {"duckduckgo": "DuckDuckGo", "playwright": "Browser", "macos-automator": "Mac automation",
+              "google-workspace": "Google"}.get(server, server)
+    return f"{server}: {tool.replace('browser_', '').replace('_', ' ')}"
+
+
 class PendingPermission:
     """A permission question waiting for your spoken yes or no."""
 
@@ -41,16 +51,31 @@ class PendingPermission:
         self.done.set()
 
 
+# Set when JARVIS runs inside JARVIS.app: status lines and events also go to the HUD.
+HUD_PUBLISH: Callable[[str, dict], None] | None = None
+CONVERSATION_PREFIXES = ("You: ", "JARVIS: ", "(using ", "(timing: ")
+
+
 def say_to_user(msg: str) -> None:
-    """Plain-English status line in the Terminal window."""
+    """Plain-English status line in the Terminal window (and the HUD's system log)."""
     print(msg, flush=True)
+    if HUD_PUBLISH and msg.strip() and not msg.startswith(CONVERSATION_PREFIXES):
+        HUD_PUBLISH("notice", {"text": msg.strip()})
+
+
+def boot_progress(step: int, total: int, label: str) -> None:
+    say_to_user(f"  {step}/{total}  {label}")
+    if HUD_PUBLISH:
+        HUD_PUBLISH("boot", {"step": step, "total": total, "label": label})
 
 
 class Jarvis:
     def __init__(self, cfg: Config, wake: Any, endpointer: Endpointer, transcriber: Any,
                  speaker: Any, brain: Any, logger: TurnLogger, hotkey: Any = None,
                  chime: Callable[[bool], None] = play_chime, ui: Callable[[str], None] = say_to_user,
-                 clock: Callable[[], float] = time.monotonic):
+                 clock: Callable[[], float] = time.monotonic,
+                 events: Callable[[str, dict], None] | None = None,
+                 commands: Callable[[], str | None] | None = None):
         self.cfg, self.wake, self.endpointer = cfg, wake, endpointer
         self.transcriber, self.speaker, self.brain = transcriber, speaker, brain
         self.logger, self.hotkey, self.chime, self.ui = logger, hotkey, chime, ui
@@ -65,9 +90,62 @@ class Jarvis:
         self._max_backlog = 0
         self._listen_step_s: list[float] = []
         self._speak_lock = threading.Lock()   # makes "cancel" and "queue a sentence" atomic
+        self.events = events                  # HUD: publish(kind, data)
+        self.commands = commands              # HUD: returns "talk" / "stop" / "yes" / "no" or None
+        self._hud_state: tuple | None = None
+        self._ui_talk = False
+
+    def _emit(self, kind: str, **data: Any) -> None:
+        if self.events:
+            try:
+                self.events(kind, data)
+            except Exception:
+                log.debug("HUD event failed", exc_info=True)
+
+    def hud_state(self) -> tuple[str, bool]:
+        """What the HUD should show: standby / listening / thinking / speaking / confirm."""
+        if self.state == IDLE:
+            return "standby", False
+        if self.pending is not None:
+            return "confirm", False
+        if self.state == LISTENING:
+            return "listening", self.follow_up
+        return ("speaking" if self.speaker.is_speaking() else "thinking"), False
+
+    # ------------------------------------------------------------ HUD buttons
+    def handle_command(self, name: str) -> None:
+        """A button or key press in the HUD. Runs on the main loop, like everything else."""
+        if name == "talk":
+            if self.state == IDLE:
+                self._ui_talk = True
+            elif self.state == RESPONDING:
+                self.barge_in()
+        elif name == "stop":
+            if self.state != IDLE:
+                with self._speak_lock:
+                    self._cancel.set()
+                    self.speaker.interrupt()
+                if self.pending:
+                    self.pending.resolve(False)
+                    self._emit("permission_done", allowed=False)
+                    self.pending = None
+                self.logger.log("stopped_from_hud")
+                self._go_idle()
+                self.ui("Stopped. Say \"hey Jarvis\" when you need me.")
+        elif name in ("yes", "no") and self.pending is not None and not self.pending.done.is_set():
+            p, allowed = self.pending, name == "yes"
+            self.logger.log("permission_reply", text=f"({name} button)", understood=allowed)
+            self.pending = None
+            if self.state == LISTENING:
+                self.state = RESPONDING
+            p.listening = False
+            p.resolve(allowed)
 
     # ------------------------------------------------------------- transitions
     def _hotkey_pressed(self) -> bool:
+        if self._ui_talk:
+            self._ui_talk = False
+            return True
         return bool(self.hotkey and self.hotkey.consume())
 
     def _go_idle(self) -> None:
@@ -111,12 +189,25 @@ class Jarvis:
     # -------------------------------------------------------------------- step
     def step(self, frame: np.ndarray) -> None:
         """Process one 80 ms microphone frame."""
+        if self.commands:
+            name = self.commands()
+            while name:
+                self.handle_command(name)
+                name = self.commands()
+        if self.events:
+            f = frame.astype(np.float32) / 32768.0 if frame.dtype == np.int16 else frame
+            self._emit("level", mic=round(float(np.sqrt(np.mean(f * f))) if len(f) else 0.0, 4))
         if self.state == LISTENING:
             started = self.clock()
             self._step(frame)
             self._listen_step_s.append(self.clock() - started)
         else:
             self._step(frame)
+        if self.events:
+            state = self.hud_state()
+            if state != self._hud_state:
+                self._hud_state = state
+                self._emit("state", state=state[0], follow_up=state[1])
 
     def _step(self, frame: np.ndarray) -> None:
         if self.state == IDLE:
@@ -173,6 +264,8 @@ class Jarvis:
             self.ui(f"You: {heard or '(unclear)'}")
             answer = parse_answer(heard)
             self.logger.log("permission_reply", text=heard, understood=answer)
+            if heard:
+                self._emit("heard", text=heard)
         self.state = RESPONDING
         p.listening = False
         if answer is None:
@@ -193,10 +286,12 @@ class Jarvis:
         text = clean_transcript(raw)
         if text is None:
             self.logger.log("dropped_transcript", text=raw)
+            self._emit("notice", text="Didn't catch that.")
             self._go_idle()
             self.ui("Say \"hey Jarvis\" when you need me.")
             return
         self.ui(f"You: {text}")
+        self._emit("heard", text=text)
         self.start_response(text)
 
     # ---------------------------------------------------------------- respond
@@ -215,6 +310,7 @@ class Jarvis:
             self.speaker.say(sentence)
             self.timing.setdefault("first_text_at", self.clock())
         self.ui(f"JARVIS: {sentence}")
+        self._emit("said", text=sentence)
         self.logger.log("spoken", text=sentence)
 
     def _respond(self, text: str, cancel: threading.Event) -> None:
@@ -230,6 +326,7 @@ class Jarvis:
                         spoke_anything = True
                 elif isinstance(ev, ToolCall):
                     self.ui(f"(using {ev.name})")
+                    self._emit("tool", name=ev.name, label=tool_label(ev.name))
                 elif isinstance(ev, PermissionRequest):
                     for s in splitter.flush():
                         self._speak(s, cancel)
@@ -257,11 +354,14 @@ class Jarvis:
     def _ask_permission(self, req: PermissionRequest, cancel: threading.Event) -> bool:
         """Speak the question, then wait until the main loop hears yes or no."""
         pending = PendingPermission(req)
-        self._speak(permission_question(req.tool_name, req.input, req.description), cancel)
+        question = permission_question(req.tool_name, req.input, req.description)
+        self._speak(question, cancel)
+        self._emit("permission", question=question, tool=tool_label(req.tool_name))
         self.pending = pending
         while not pending.done.wait(0.05):
             if cancel.is_set():
                 return False
+        self._emit("permission_done", allowed=pending.allowed)
         if pending.allowed:
             self._speak("Very good.", cancel)
         else:
@@ -293,6 +393,7 @@ class Jarvis:
                         voice_level=t.get("voice_level"), background_level=t.get("background_level"),
                         room_level=t.get("room_level"), behind_s=round(behind_s, 2),
                         slowest_listen_step_ms=round(slowest_ms, 1))
+        self._emit("timing", **rounded, ended_by=t.get("ended_by"), behind_s=round(behind_s, 2))
         if not self.cfg.show_timings:
             return
         line = "(timing: "
@@ -315,13 +416,21 @@ class Jarvis:
 
 
 # ----------------------------------------------------------------------- start
-def build_and_run(cfg: Config, prepare_only: bool = False) -> int:  # pragma: no cover - needs a Mac
+def fatal(msg: str) -> int:
+    """A problem JARVIS can't recover from. JARVIS.app shows the message in a dialog."""
+    say_to_user(msg)
+    print(f"JARVIS_FATAL={msg}", flush=True)
+    if HUD_PUBLISH:
+        HUD_PUBLISH("fatal", {"text": msg})
+    return 1
+
+
+def build_and_run(cfg: Config, prepare_only: bool = False, hud: Any = None) -> int:  # pragma: no cover - Mac
     from .stt import detect_chip
     from .tts import Speaker
 
     if shutil.which(cfg.claude_command) is None:
-        say_to_user("I can't find Claude Code (the 'claude' program). Install it, sign in, then run ./setup.sh again.")
-        return 1
+        return fatal("I can't find Claude Code (the 'claude' program). Install it, sign in, then run ./setup.sh again.")
 
     chip = detect_chip()
     say_to_user(f"Starting JARVIS on an {'Apple Silicon' if chip == 'apple' else 'Intel'} Mac.")
@@ -338,7 +447,35 @@ def build_and_run(cfg: Config, prepare_only: bool = False) -> int:  # pragma: no
     setup_logging(cfg.log_path)          # make sure no library has redirected JARVIS's own log
     timing_log = TurnLogger(cfg.log_path)
     speaker = Speaker(engines, player, on_timing=lambda d: timing_log.log("voice_timing", **d))
-    return _run(cfg, wake, vad, transcriber, speaker)
+    if hud is not None:
+        backend = getattr(player, "_backend", None)
+        if hasattr(backend, "on_level"):
+            backend.on_level = lambda level: hud.publish("level", {"out": round(level, 4)})
+        hud.publish("config", config_summary(cfg, engines, transcriber))
+    return _run(cfg, wake, vad, transcriber, speaker, hud)
+
+
+def config_summary(cfg: Config, engines: list, transcriber: Any) -> dict:
+    """What the HUD shows in its systems panel."""
+    import json as _json
+
+    from .config import REPO_ROOT
+    from .stt import mac_memory_gb
+    from .wake import hotkey_label
+
+    try:
+        servers = _json.loads((REPO_ROOT / ".mcp.json").read_text()).get("mcpServers", {})
+        settings = _json.loads((REPO_ROOT / ".claude" / "settings.json").read_text())
+        tools = [n for n in servers if n not in settings.get("disabledMcpjsonServers", [])]
+    except Exception:
+        tools = []
+    voice = engines[0]
+    return {
+        "model": cfg.model, "voice": voice.name, "voice_detail": getattr(voice, "voice", "") or "",
+        "voice_device": getattr(voice, "device", ""), "speech_model": getattr(transcriber, "model", ""),
+        "hotkey": hotkey_label(cfg.hotkey), "tools": tools, "memory_gb": mac_memory_gb(),
+        "follow_up_seconds": cfg.follow_up_seconds,
+    }
 
 
 def _load_everything(cfg: Config, chip: str, prepare_only: bool):  # pragma: no cover - needs a Mac
@@ -348,21 +485,21 @@ def _load_everything(cfg: Config, chip: str, prepare_only: bool):  # pragma: no 
     from .tts import load_engines
     from .wake import WakeWordDetector, download_wake_model, load_wake_model
 
-    say_to_user("  1/4  Wake word")
+    boot_progress(1, 4, "Wake word")
     if prepare_only:
         download_wake_model()
     wake = WakeWordDetector(load_wake_model(), threshold=cfg.wake_threshold)
 
-    say_to_user("  2/4  Speech detector")
+    boot_progress(2, 4, "Speech detector")
     vad = load_silero_vad()
 
-    say_to_user("  3/4  Speech recognition")
+    boot_progress(3, 4, "Speech recognition")
     transcriber = load_transcriber(cfg.whisper_model_apple, cfg.whisper_model_intel, chip)
     model_name = getattr(transcriber, "model", None)
     if chip == "apple" and model_name and model_name != cfg.whisper_model_apple:
         say_to_user(f"  (Couldn't load {cfg.whisper_model_apple}; using {model_name} instead.)")
 
-    say_to_user("  4/4  Voice")
+    boot_progress(4, 4, "Voice")
     if prepare_only and "piper" in cfg.tts_engines:
         from piper.download_voices import download_voice
         cfg.piper_dir.mkdir(parents=True, exist_ok=True)
@@ -370,8 +507,7 @@ def _load_everything(cfg: Config, chip: str, prepare_only: bool):  # pragma: no 
     player = Player()
     engines = load_engines(cfg.tts_engines, cfg, notify=say_to_user)
     if not engines:
-        say_to_user("None of the voices could start. Run ./setup.sh again.")
-        return 1, None, None, None, None, None
+        return fatal("None of the voices could start. Run ./setup.sh again."), None, None, None, None, None
     where = {"mps": " on the graphics chip", "cpu": " on the processor"}.get(getattr(engines[0], "device", ""), "")
     say_to_user(f"  Voice in use: {engines[0].name}{where}")
     _warm_up_listening(transcriber, engines, chip)
@@ -413,7 +549,8 @@ def _warm_up_listening(transcriber: Any, engines: list, chip: str) -> float | No
     return seconds
 
 
-def _run(cfg: Config, wake: Any, vad: Any, transcriber: Any, speaker: Any) -> int:  # pragma: no cover - needs a Mac
+def _run(cfg: Config, wake: Any, vad: Any, transcriber: Any, speaker: Any,
+         hud: Any = None) -> int:  # pragma: no cover - needs a Mac
     from .audio import Microphone
     from .brain import ClaudeBrain
     from .wake import PushToTalk, hotkey_label
@@ -431,12 +568,16 @@ def _run(cfg: Config, wake: Any, vad: Any, transcriber: Any, speaker: Any) -> in
     try:
         mic.start()
     except Exception as exc:
-        say_to_user("I can't use the microphone. Allow microphone access for Terminal in "
-                    "System Settings > Privacy & Security > Microphone, then start me again.")
         log.error("Microphone failed: %s", exc)
-        return 1
+        who = "JARVIS" if hud is not None else "Terminal"
+        return fatal(f"I can't use the microphone. Allow microphone access for {who} in "
+                     "System Settings > Privacy & Security > Microphone, then start me again.")
 
-    jarvis = Jarvis(cfg, wake, endpointer, transcriber, speaker, brain, logger, hotkey)
+    jarvis = Jarvis(cfg, wake, endpointer, transcriber, speaker, brain, logger, hotkey,
+                    events=hud.publish if hud is not None else None,
+                    commands=hud.next_command if hud is not None else None)
+    if hud is not None:
+        _start_telemetry(hud, brain, mic)
     voice_log = speaker.on_timing
 
     def on_timing(info: dict) -> None:
@@ -446,7 +587,9 @@ def _run(cfg: Config, wake: Any, vad: Any, transcriber: Any, speaker: Any) -> in
     speaker.on_timing = on_timing
     speaker.say("At your service.")
     say_to_user(f"\nJARVIS is ready. Say \"hey Jarvis\" or press {hotkey_label(cfg.hotkey)}. "
-                "Press Control-C to quit.\n")
+                + ("Quit with Command-Q." if hud is not None else "Press Control-C to quit.") + "\n")
+    if hud is not None:
+        hud.publish("boot", {"step": 4, "total": 4, "label": "Ready", "ready": True})
     try:
         for frame in mic.frames():
             jarvis.note_backlog(mic.backlog())
@@ -465,18 +608,70 @@ def _run(cfg: Config, wake: Any, vad: Any, transcriber: Any, speaker: Any) -> in
     return 0
 
 
+def _start_telemetry(hud: Any, brain: Any, mic: Any, every_s: float = 2.0) -> None:  # pragma: no cover - Mac
+    """Every few seconds, tell the HUD how the Mac and JARVIS are doing."""
+    import os
+
+    from .stt import swap_used_gb
+
+    started = time.monotonic()
+
+    def loop() -> None:
+        while True:
+            try:
+                load = os.getloadavg()[0]
+            except OSError:
+                load = None
+            hud.publish("telemetry", {
+                "uptime_s": round(time.monotonic() - started), "load": load,
+                "cores": os.cpu_count(), "swap_gb": swap_used_gb(),
+                "claude_online": bool(brain.alive()), "behind_s": round(mic.backlog() * 0.08, 1),
+            })
+            time.sleep(every_s)
+
+    threading.Thread(target=loop, name="hud-telemetry", daemon=True).start()
+
+
+def start_hud(open_browser: bool = False):  # pragma: no cover - exercised on a Mac
+    """Start the HUD web server and route status lines to it. Returns the event bus."""
+    import signal
+    import webbrowser
+
+    from .hud.bus import EventBus
+    from .hud.server import HudServer
+
+    global HUD_PUBLISH
+    bus = EventBus()
+    server = HudServer(bus).start()
+    HUD_PUBLISH = bus.publish
+    print(f"JARVIS_HUD_URL={server.url}", flush=True)     # JARVIS.app reads this line
+
+    def quit_quietly(signum, frame):                     # JARVIS.app was closed
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, quit_quietly)
+    if open_browser:
+        webbrowser.open(server.url)
+    return bus
+
+
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin wrapper
     parser = argparse.ArgumentParser(prog="jarvis", description="JARVIS voice assistant")
     parser.add_argument("--prepare", action="store_true", help="download and load all models, then exit")
     parser.add_argument("--verbose", action="store_true", help="write extra detail to logs/jarvis.log")
+    parser.add_argument("--app", action="store_true", help="run with the HUD (used by JARVIS.app)")
+    parser.add_argument("--browser", action="store_true", help="with --app: also open the HUD in a web browser")
     args = parser.parse_args(argv)
+    hud = start_hud(open_browser=args.browser) if args.app else None
     try:
         cfg = load_config()
     except ConfigError as exc:
-        say_to_user(f"There's a problem in config.yaml: {exc}")
-        return 1
+        return fatal(f"There's a problem in config.yaml: {exc}")
     setup_logging(cfg.log_path, args.verbose)
-    return build_and_run(cfg, prepare_only=args.prepare)
+    try:
+        return build_and_run(cfg, prepare_only=args.prepare, hud=hud)
+    except KeyboardInterrupt:
+        say_to_user("Goodbye.")
+        return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

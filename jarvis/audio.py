@@ -122,6 +122,7 @@ class SoundDeviceOutput:
         self._sd = sd_module
         self._stream = None
         self._rate: int | None = None
+        self.on_level: Callable[[float], None] | None = None   # loudness of what is playing (for the HUD)
 
     def _open(self, rate: int):
         if self._sd is None:
@@ -144,7 +145,12 @@ class SoundDeviceOutput:
             if stop.is_set():
                 out.abort()          # throw away anything still buffered so speech stops at once
                 return
-            out.write(samples[i:i + block].reshape(-1, 1))
+            piece = samples[i:i + block]
+            out.write(piece.reshape(-1, 1))
+            if self.on_level is not None and len(piece):
+                self.on_level(float(np.sqrt(np.mean(piece * piece))))
+        if self.on_level is not None:
+            self.on_level(0.0)
 
     def close(self) -> None:
         if self._stream is not None:
