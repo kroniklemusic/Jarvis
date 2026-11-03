@@ -264,7 +264,7 @@ def voice_speed_test(out: Callable[[str], None] = print) -> int:
         candidates.append(("Kokoro", lambda: KokoroTTS(cfg.kokoro_voice, cfg.speech_speed, "cpu")))
     candidates.append(("Piper", lambda: PiperTTS(cfg.piper_voice, cfg.piper_dir, cfg.speech_speed)))
 
-    best = None
+    results: list[tuple[str, float, object]] = []
     for label, make in candidates:
         try:
             t0 = time.monotonic()
@@ -283,17 +283,18 @@ def voice_speed_test(out: Callable[[str], None] = print) -> int:
             worst = max(ratios)
             verdict = "fast enough" if worst <= 0.5 else ("a little slow" if worst <= 1.0 else "too slow")
             out(f"   -> worst case {worst:.2f}: {verdict}\n")
-            if best is None or worst < best[1]:
-                best = (label, worst, engine)
+            results.append((label, worst, engine))
         except Exception as exc:
             out(f"{label}: could not run ({exc})\n")
 
-    if best is None:
+    if not results:
         out("No voice could run. Please run ./setup.sh again.")
         return 1
 
-    label, worst, engine = best
-    out(f"Fastest on this Mac: {label}. Playing three test sentences with it now - listen for choppiness.")
+    # Use the first voice that is fast enough, in the order JARVIS prefers (Kokoro sounds best).
+    label, worst, engine = next((r for r in results if r[1] <= 0.5), min(results, key=lambda r: r[1]))
+    out(f"Best choice on this Mac: {label}. Playing three test sentences with it now -")
+    out("listen for whether the speech sounds smooth or choppy.")
     timings: list[dict] = []
     speaker = Speaker([engine], on_timing=timings.append)
     for sentence in VOICE_TEST_SENTENCES:

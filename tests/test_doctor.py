@@ -141,3 +141,4 @@ def test_voice_speed_test_prints_plain_results(monkeypatch):
     assert "Kokoro: loaded in" in text and "fast enough" in text
     assert "Piper: could not run" in text
     assert "started playing 0.12 s" in text
+    assert "Best choice on this Mac: Kokoro" in text
