@@ -55,6 +55,24 @@ class WakeWordDetector:
             reset()
 
 
+_KEY_NAMES = {"<ctrl>": "Control", "<alt>": "Option", "<cmd>": "Command", "<shift>": "Shift",
+              "<space>": "Space", "<enter>": "Return", "<esc>": "Escape", "<tab>": "Tab"}
+
+
+def hotkey_label(hotkey: str) -> str:
+    """'<ctrl>+<alt>+j' -> 'Control + Option + J' (how the keys are labelled on a Mac)."""
+    parts = []
+    for part in hotkey.split("+"):
+        part = part.strip()
+        if part in _KEY_NAMES:
+            parts.append(_KEY_NAMES[part])
+        elif part.startswith("<") and part.endswith(">"):
+            parts.append(part.strip("<>").upper() if len(part) <= 5 else part.strip("<>").title())
+        else:
+            parts.append(part.upper())
+    return " + ".join(parts)
+
+
 class PushToTalk:
     """A global keyboard shortcut that acts like saying "hey Jarvis"."""
 

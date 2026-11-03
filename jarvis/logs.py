@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import sys
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 class TurnLogger:
@@ -26,6 +29,26 @@ class TurnLogger:
         line = json.dumps(record, ensure_ascii=False, default=str)
         with self._lock, self.path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
+
+
+@contextmanager
+def stderr_to_file(path: Path) -> Iterator[None]:
+    """Send everything printed to the error stream (including from C libraries) to a log file.
+
+    Used while loading models, which print a lot of harmless technical warnings."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sys.stderr.flush()
+    saved = os.dup(2)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(f"\n--- model loading output {datetime.now():%Y-%m-%d %H:%M:%S} ---\n")
+        f.flush()
+        os.dup2(f.fileno(), 2)
+        try:
+            yield
+        finally:
+            sys.stderr.flush()
+            os.dup2(saved, 2)
+            os.close(saved)
 
 
 def setup_logging(log_dir: Path, verbose: bool = False) -> None:

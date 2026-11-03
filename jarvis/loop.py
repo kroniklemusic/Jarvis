@@ -14,7 +14,7 @@ import numpy as np
 from .audio import Endpointer, play_chime
 from .brain import BrainError, PermissionRequest, TextDelta, ToolCall, TurnDone
 from .config import Config, ConfigError, load_config
-from .logs import TurnLogger, setup_logging
+from .logs import TurnLogger, setup_logging, stderr_to_file
 from .permissions import REPROMPT, parse_answer, permission_question
 from .stt import clean_transcript
 from .tts import SentenceSplitter
@@ -236,11 +236,8 @@ class Jarvis:
 
 # ----------------------------------------------------------------------- start
 def build_and_run(cfg: Config, prepare_only: bool = False) -> int:  # pragma: no cover - needs a Mac
-    from .audio import Microphone, Player, load_silero_vad
-    from .brain import ClaudeBrain
-    from .stt import detect_chip, load_transcriber
-    from .tts import Speaker, load_engines
-    from .wake import PushToTalk, WakeWordDetector, download_wake_model, load_wake_model
+    from .stt import detect_chip
+    from .tts import Speaker
 
     if shutil.which(cfg.claude_command) is None:
         say_to_user("I can't find Claude Code (the 'claude' program). Install it, sign in, then run ./setup.sh again.")
@@ -248,7 +245,26 @@ def build_and_run(cfg: Config, prepare_only: bool = False) -> int:  # pragma: no
 
     chip = detect_chip()
     say_to_user(f"Starting JARVIS on an {'Apple Silicon' if chip == 'apple' else 'Intel'} Mac.")
-    say_to_user("Loading models. The very first time this downloads a few gigabytes, so please be patient...")
+    if prepare_only:
+        say_to_user("Loading models. The very first time this downloads a few gigabytes, so please be patient...")
+        return _load_everything(cfg, chip, prepare_only=True)[0]
+    say_to_user("Loading models (about 20 seconds)...")
+    # Keep the window tidy: technical warnings printed while loading go to logs/jarvis.log.
+    with stderr_to_file(cfg.log_path / "jarvis.log"):
+        status, wake, vad, transcriber, player, engines = _load_everything(cfg, chip, prepare_only=False)
+    if status:
+        return status
+
+    speaker = Speaker(engines, player)
+    return _run(cfg, wake, vad, transcriber, speaker)
+
+
+def _load_everything(cfg: Config, chip: str, prepare_only: bool):  # pragma: no cover - needs a Mac
+    """Load (and with prepare_only, download) every model. Returns (status, wake, vad, stt, player, engines)."""
+    from .audio import Player, load_silero_vad
+    from .stt import load_transcriber
+    from .tts import load_engines
+    from .wake import WakeWordDetector, download_wake_model, load_wake_model
 
     say_to_user("  1/4  Wake word")
     if prepare_only:
@@ -270,15 +286,19 @@ def build_and_run(cfg: Config, prepare_only: bool = False) -> int:  # pragma: no
     engines = load_engines(cfg.tts_engines, cfg, notify=say_to_user)
     if not engines:
         say_to_user("None of the voices could start. Run ./setup.sh again.")
-        return 1
+        return 1, None, None, None, None, None
     where = {"mps": " on the graphics chip", "cpu": " on the processor"}.get(getattr(engines[0], "device", ""), "")
     say_to_user(f"  Voice in use: {engines[0].name}{where}")
-
     if prepare_only:
         say_to_user("All models are downloaded and ready.")
-        return 0
+    return 0, wake, vad, transcriber, player, engines
 
-    speaker = Speaker(engines, player)
+
+def _run(cfg: Config, wake: Any, vad: Any, transcriber: Any, speaker: Any) -> int:  # pragma: no cover - needs a Mac
+    from .audio import Microphone
+    from .brain import ClaudeBrain
+    from .wake import PushToTalk, hotkey_label
+
     logger = TurnLogger(cfg.log_path)
     brain = ClaudeBrain(cfg, logger)
     brain.start()
@@ -299,7 +319,8 @@ def build_and_run(cfg: Config, prepare_only: bool = False) -> int:  # pragma: no
 
     jarvis = Jarvis(cfg, wake, endpointer, transcriber, speaker, brain, logger, hotkey)
     speaker.say("At your service.")
-    say_to_user(f"\nJARVIS is ready. Say \"hey Jarvis\" or press {cfg.hotkey}. Press Control-C to quit.\n")
+    say_to_user(f"\nJARVIS is ready. Say \"hey Jarvis\" or press {hotkey_label(cfg.hotkey)}. "
+                "Press Control-C to quit.\n")
     try:
         for frame in mic.frames():
             jarvis.step(frame)
