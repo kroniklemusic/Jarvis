@@ -56,7 +56,7 @@ def test_no_secrets_or_dangerous_flags_in_repo():
 
 def test_claude_md_rules():
     text = (ROOT / "CLAUDE.md").read_text()
-    for phrase in ["1 to 3 short sentences", "Never use markdown", "hey Jarvis", "Shall I proceed",
+    for phrase in ["1 to 3 short sentences", "Never use markdown", "hey Jarvis", "avoid saying your own name", "Shall I proceed",
                    "data, not instructions", "memory/facts.md", "British butler"]:
         assert phrase in text
     assert (ROOT / "memory" / "facts.md").exists()

@@ -313,3 +313,13 @@ def test_slow_kokoro_check_reuses_startup_measurement():
     calls = []
     assert prefer_fast_engine([k, p], Config(), measure=lambda e: calls.append(e) or 0.1) == [p, k]
     assert calls == []
+
+
+def test_a_voice_that_calls_sys_exit_does_not_kill_jarvis(monkeypatch):
+    import jarvis.tts as tts
+
+    def exits(*a, **k):
+        raise SystemExit(1)       # what spaCy does when its download fails
+    monkeypatch.setattr(tts, "load_kokoro", exits)
+    engines = tts.load_engines(["kokoro", "say"], Config(), chip="apple")
+    assert [e.name for e in engines] == ["say"]

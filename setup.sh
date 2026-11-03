@@ -90,6 +90,16 @@ uv pip install --python "$VENV/bin/python" -r requirements.txt \
   || fail "Installing Python packages failed. Check your internet connection and run ./setup.sh again."
 say_ok "Python packages installed"
 
+# The Kokoro voice needs spaCy's small English language file to work out pronunciation.
+SPACY_EN="en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+if "$VENV/bin/python" -c "import en_core_web_sm" >/dev/null 2>&1; then
+  say_ok "English pronunciation data already installed"
+else
+  uv pip install --python "$VENV/bin/python" "$SPACY_EN" \
+    || fail "Downloading the English pronunciation data failed. Check your internet connection and run ./setup.sh again."
+  say_ok "English pronunciation data installed"
+fi
+
 say_step "Installing the web browser JARVIS uses for browsing (Playwright's open-source Firefox)"
 npx -y @playwright/mcp@0.0.84 install-browser firefox \
   || say_warn "The browser download failed. Web browsing won't work until you run ./setup.sh again."

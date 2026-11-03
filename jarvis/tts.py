@@ -226,7 +226,7 @@ def load_kokoro(cfg, chip: str, make: Callable[[str], Any] | None = None,
             if not audio_is_sound(list(engine.synthesize("Testing."))):
                 raise RuntimeError("it produced silence or invalid audio")
             ratio = measure(engine)
-        except Exception as exc:
+        except (Exception, SystemExit) as exc:   # some libraries call sys.exit() when a download fails
             log.warning("Kokoro on %s didn't work: %s", device, exc)
             continue
         log.info("Kokoro on %s: %.2f s of work per second of speech", device, ratio)
@@ -258,7 +258,7 @@ def load_engines(names: list[str], cfg, notify: Callable[[str], None] | None = N
             elif name == "say":
                 engines.append(SayTTS(cfg.say_voice, cfg.speech_speed))
             log.info("Voice engine ready: %s", name)
-        except Exception as exc:
+        except (Exception, SystemExit) as exc:   # SystemExit: spaCy exits if its download fails
             log.warning("Voice engine %s could not load: %s", name, exc)
     return prefer_fast_engine(engines, cfg, notify)
 
