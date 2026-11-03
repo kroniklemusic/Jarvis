@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # JARVIS health check. Run from the jarvis folder:   ./doctor.sh
-# Add --no-audio to skip the microphone and voice tests.
+# Add --no-audio to skip the microphone and voice tests, or --voice for a voice speed test.
 set -euo pipefail
 cd "$(dirname "$0")"
 

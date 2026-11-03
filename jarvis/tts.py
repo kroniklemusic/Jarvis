@@ -308,12 +308,14 @@ class Speaker:
     """
 
     def __init__(self, engines: list[Any], player: Player | None = None,
-                 clock: Callable[[], float] = time.monotonic):
+                 clock: Callable[[], float] = time.monotonic,
+                 on_timing: Callable[[dict], None] | None = None):
         if not engines:
             raise RuntimeError("No voice engine could start.")
         self.engines = list(engines)
         self.player = player or Player()
         self.clock = clock
+        self.on_timing = on_timing          # receives {"stage", "seconds", "text", ...} for each sentence
         self._text_q: queue.Queue = queue.Queue()
         self._audio_q: queue.Queue = queue.Queue()
         self._generation = 0
@@ -368,6 +370,14 @@ class Speaker:
         self._audio_q.put(None)
 
     # -- internals
+    def _timing(self, stage: str, seconds: float, text: str, **extra: Any) -> None:
+        log.info("voice: %s %.2fs after queueing: %r %s", stage, seconds, text[:40], extra or "")
+        if self.on_timing:
+            try:
+                self.on_timing({"stage": stage, "seconds": round(seconds, 3), "text": text[:80], **extra})
+            except Exception:
+                pass
+
     def _current(self, gen: int) -> bool:
         return gen == self._generation
 
@@ -400,7 +410,7 @@ class Speaker:
             while True:
                 engine = self.engines[0]
                 if not hasattr(engine, "synthesize"):          # e.g. macOS `say`: the player runs it
-                    self._audio_q.put((gen, "speak", (engine, text), queued_at))
+                    self._audio_q.put((gen, "speak", (engine, text), queued_at, text))
                     break
                 produced = 0
                 started = self.clock()
@@ -409,16 +419,15 @@ class Speaker:
                         if not self._current(gen):
                             break
                         if produced == 0:
-                            log.info("voice: first audio of %r ready %.2fs after queueing (%s)",
-                                     text[:40], self.clock() - queued_at, engine.name)
+                            self._timing("audio_ready", self.clock() - queued_at, text, engine=engine.name)
                         produced += 1
-                        self._audio_q.put((gen, "audio", (samples, rate), queued_at))
+                        self._audio_q.put((gen, "audio", (samples, rate), queued_at, text))
                     log.debug("voice: built %r in %.2fs", text[:40], self.clock() - started)
                     break
                 except Exception as exc:
                     if produced or not self._current(gen) or not self._next_engine(engine, exc):
                         break
-            self._audio_q.put((gen, "end", None, queued_at))
+            self._audio_q.put((gen, "end", None, queued_at, text))
 
     def _play_loop(self) -> None:
         first_audio_logged: set[float] = set()
@@ -426,7 +435,7 @@ class Speaker:
             item = self._audio_q.get()
             if item is None:
                 return
-            gen, kind, payload, queued_at = item
+            gen, kind, payload, queued_at, text = item
             if not self._current(gen):
                 continue
             if kind == "end":
@@ -434,7 +443,7 @@ class Speaker:
                 continue
             if queued_at not in first_audio_logged:
                 first_audio_logged.add(queued_at)
-                log.info("voice: started speaking %.2fs after the sentence was queued", self.clock() - queued_at)
+                self._timing("started_speaking", self.clock() - queued_at, text)
                 if len(first_audio_logged) > 1000:
                     first_audio_logged.clear()
             if kind == "audio":

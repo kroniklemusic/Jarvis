@@ -343,3 +343,25 @@ def test_speed_test_uses_several_new_sentences():
 
 def test_default_voice_device_is_the_processor():
     assert Config().kokoro_device == "cpu"
+
+
+def test_speaker_reports_timings_for_each_sentence():
+    events = []
+    s = Speaker([FakeSynthEngine(build_s=0.05, audio_s=0.05)], RecordingPlayer(), on_timing=events.append)
+    s.say("First.")
+    s.say("Second.")
+    assert s.wait(3)
+    stages = [(e["stage"], e["text"]) for e in events]
+    assert stages.count(("audio_ready", "First.")) == 1 and ("started_speaking", "First.") in stages
+    assert ("started_speaking", "Second.") in stages
+    ready = next(e for e in events if e["stage"] == "audio_ready")
+    assert ready["engine"] == "kokoro" and ready["seconds"] >= 0.05
+
+
+def test_a_broken_timing_callback_never_stops_speech():
+    def broken(_):
+        raise ValueError("oops")
+    engine = FakeSynthEngine()
+    s = Speaker([engine], RecordingPlayer(), on_timing=broken)
+    s.say("Still spoken.")
+    assert s.wait(2) and engine.built == ["Still spoken."]

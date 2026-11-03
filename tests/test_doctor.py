@@ -94,3 +94,50 @@ def test_report_and_exit_code(monkeypatch, capsys):
     assert doctor.main(["--no-audio"]) == 0
     out = capsys.readouterr().out
     assert "Everything looks good" in out
+
+
+def test_voice_speed_test_prints_plain_results(monkeypatch):
+    import numpy as np
+
+    import jarvis.stt
+    import jarvis.tts
+
+    class Fast:
+        name = "kokoro"
+
+        def __init__(self, *a):
+            pass
+
+        def synthesize(self, text):
+            yield np.full(2400, 0.1, dtype=np.float32), 24000
+
+        def stop(self):
+            pass
+
+    class Broken:
+        def __init__(self, *a):
+            raise FileNotFoundError("Piper voice file not found")
+
+    class QuietSpeaker:
+        def __init__(self, engines, on_timing=None):
+            self.on_timing = on_timing
+
+        def say(self, text):
+            self.on_timing({"stage": "started_speaking", "seconds": 0.12, "text": text})
+
+        def wait(self, t):
+            return True
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(jarvis.stt, "detect_chip", lambda: "intel")
+    monkeypatch.setattr(jarvis.tts, "KokoroTTS", Fast)
+    monkeypatch.setattr(jarvis.tts, "PiperTTS", Broken)
+    monkeypatch.setattr(jarvis.tts, "Speaker", QuietSpeaker)
+    lines = []
+    assert doctor.voice_speed_test(lines.append) == 0
+    text = "\n".join(lines)
+    assert "Kokoro: loaded in" in text and "fast enough" in text
+    assert "Piper: could not run" in text
+    assert "started playing 0.12 s" in text

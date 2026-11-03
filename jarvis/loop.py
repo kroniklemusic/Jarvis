@@ -255,7 +255,9 @@ def build_and_run(cfg: Config, prepare_only: bool = False) -> int:  # pragma: no
     if status:
         return status
 
-    speaker = Speaker(engines, player)
+    setup_logging(cfg.log_path)          # make sure no library has redirected JARVIS's own log
+    timing_log = TurnLogger(cfg.log_path)
+    speaker = Speaker(engines, player, on_timing=lambda d: timing_log.log("voice_timing", **d))
     return _run(cfg, wake, vad, transcriber, speaker)
 
 

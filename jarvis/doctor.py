@@ -228,8 +228,89 @@ def print_report(checks: list[Check], header: bool = False) -> None:
     sys.stdout.flush()
 
 
+VOICE_TEST_SENTENCES = (
+    "Good afternoon.",
+    "I'm in fine form, thank you, and all systems are running smoothly.",
+    "Tomorrow looks mild in London, with light rain arriving in the late afternoon.",
+)
+
+
+def voice_speed_test(out: Callable[[str], None] = print) -> int:
+    """Time each voice on this Mac and print the results in plain English (./doctor.sh --voice)."""
+    from .logs import stderr_to_file
+    from .stt import detect_chip
+    from .tts import KokoroTTS, PiperTTS, Speaker, performance_cores
+
+    cfg = load_config()
+    log_file = cfg.log_path / "jarvis.log"
+    chip = detect_chip()
+    out("\nVoice speed test (about a minute)\n--------------------------------")
+    out("For each voice: how long it takes to prepare a sentence, compared with how long the sentence")
+    out("lasts when spoken. Smaller is better; under 0.5 means replies can start without a noticeable wait.\n")
+
+    candidates: list[tuple[str, Callable[[], object]]] = []
+    if chip == "apple":
+        with stderr_to_file(log_file):
+            import torch
+            cores = performance_cores()
+            if cores:
+                torch.set_num_threads(cores)
+            has_mps = bool(torch.backends.mps.is_available())
+        candidates.append(("Kokoro on the processor", lambda: KokoroTTS(cfg.kokoro_voice, cfg.speech_speed, "cpu")))
+        if has_mps:
+            candidates.append(("Kokoro on the graphics chip",
+                               lambda: KokoroTTS(cfg.kokoro_voice, cfg.speech_speed, "mps")))
+    else:
+        candidates.append(("Kokoro", lambda: KokoroTTS(cfg.kokoro_voice, cfg.speech_speed, "cpu")))
+    candidates.append(("Piper", lambda: PiperTTS(cfg.piper_voice, cfg.piper_dir, cfg.speech_speed)))
+
+    best = None
+    for label, make in candidates:
+        try:
+            t0 = time.monotonic()
+            with stderr_to_file(log_file):
+                engine = make()
+            out(f"{label}: loaded in {time.monotonic() - t0:.1f} s")
+            ratios = []
+            for sentence in VOICE_TEST_SENTENCES:
+                t0 = time.monotonic()
+                with stderr_to_file(log_file):
+                    chunks = list(engine.synthesize(sentence))
+                took = time.monotonic() - t0
+                length = sum(len(a) / sr for a, sr in chunks)
+                ratios.append(took / length if length else float("inf"))
+                out(f"   prepared {length:4.1f} s of speech in {took:4.2f} s   \"{sentence[:45]}\"")
+            worst = max(ratios)
+            verdict = "fast enough" if worst <= 0.5 else ("a little slow" if worst <= 1.0 else "too slow")
+            out(f"   -> worst case {worst:.2f}: {verdict}\n")
+            if best is None or worst < best[1]:
+                best = (label, worst, engine)
+        except Exception as exc:
+            out(f"{label}: could not run ({exc})\n")
+
+    if best is None:
+        out("No voice could run. Please run ./setup.sh again.")
+        return 1
+
+    label, worst, engine = best
+    out(f"Fastest on this Mac: {label}. Playing three test sentences with it now - listen for choppiness.")
+    timings: list[dict] = []
+    speaker = Speaker([engine], on_timing=timings.append)
+    for sentence in VOICE_TEST_SENTENCES:
+        speaker.say(sentence)
+    speaker.wait(60)
+    speaker.close()
+    started = [t["seconds"] for t in timings if t["stage"] == "started_speaking"]
+    if started:
+        out(f"The first sentence started playing {started[0]:.2f} s after it was handed to the voice.")
+    out("\nPlease copy everything above and send it to whoever is helping you with JARVIS.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if "--voice" in argv:
+        return voice_speed_test()
     checks = run_all(skip_audio="--no-audio" in argv)
     failed = [c for c in checks if not c.ok and not c.warning]
     warned = [c for c in checks if c.warning and (not c.ok or c.fix)]
