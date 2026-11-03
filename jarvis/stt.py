@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import platform
 import re
-from typing import Protocol
+import subprocess
+import time
+from typing import Callable, Protocol
 
 import numpy as np
 
@@ -59,11 +61,17 @@ class Transcriber(Protocol):
     def transcribe(self, audio: np.ndarray) -> str: ...
 
 
-class MlxWhisper:
-    def __init__(self, model: str):
-        import mlx_whisper
+# One attempt per request. Whisper's default retries up to six times with more randomness when it
+# isn't confident, repeating all the work each time - far too slow for a voice assistant.
+TEMPERATURE = 0.0
 
-        self._mlx = mlx_whisper
+
+class MlxWhisper:
+    def __init__(self, model: str, mlx_module=None):
+        if mlx_module is None:
+            import mlx_whisper as mlx_module
+
+        self._mlx = mlx_module
         self.model = model
         # Warm up once so the model is loaded (and downloaded if needed) at startup.
         self.transcribe(np.zeros(16_000, dtype=np.float32))
@@ -71,7 +79,7 @@ class MlxWhisper:
     def transcribe(self, audio: np.ndarray) -> str:
         result = self._mlx.transcribe(
             audio.astype(np.float32), path_or_hf_repo=self.model, language=LANGUAGE,
-            condition_on_previous_text=False, verbose=None,
+            condition_on_previous_text=False, verbose=None, temperature=TEMPERATURE,
         )
         return str(result.get("text", "")).strip()
 
@@ -85,9 +93,26 @@ class FasterWhisper:
     def transcribe(self, audio: np.ndarray) -> str:
         segments, _info = self._model.transcribe(
             audio.astype(np.float32), language=LANGUAGE, beam_size=1,
-            condition_on_previous_text=False,
+            condition_on_previous_text=False, temperature=TEMPERATURE,
         )
         return "".join(s.text for s in segments).strip()
+
+
+def timed_transcription(transcriber: Transcriber, audio: np.ndarray,
+                        clock: Callable[[], float] = time.monotonic) -> tuple[str, float]:
+    """Transcribe and return (text, seconds taken)."""
+    started = clock()
+    text = transcriber.transcribe(audio)
+    return text, clock() - started
+
+
+def mac_memory_gb(run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> float | None:
+    """Installed memory (RAM) in GB, or None if it can't be read."""
+    try:
+        out = run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True, timeout=5)
+        return int(out.stdout.strip()) / 1024 ** 3
+    except Exception:
+        return None
 
 
 def load_transcriber(apple_model: str, intel_model: str, chip: str | None = None) -> Transcriber:

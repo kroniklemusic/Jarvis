@@ -371,9 +371,38 @@ def _load_everything(cfg: Config, chip: str, prepare_only: bool):  # pragma: no 
         return 1, None, None, None, None, None
     where = {"mps": " on the graphics chip", "cpu": " on the processor"}.get(getattr(engines[0], "device", ""), "")
     say_to_user(f"  Voice in use: {engines[0].name}{where}")
+    _warm_up_listening(transcriber, engines, chip)
     if prepare_only:
         say_to_user("All models are downloaded and ready.")
     return 0, wake, vad, transcriber, player, engines
+
+
+SLOW_TRANSCRIPTION_S = 3.0
+WARM_UP_SENTENCE = "Hello there, how are you doing today?"
+
+
+def _warm_up_listening(transcriber: Any, engines: list, chip: str) -> float | None:  # pragma: no cover - Mac
+    """Run speech recognition once on a real spoken sentence (made with JARVIS's own voice).
+
+    Warming up on silence leaves most of the one-time setup to your first real request; a real
+    sentence gets it all done at startup, and tells us how fast recognition is on this Mac."""
+    from .audio import resample
+    from .stt import mac_memory_gb, timed_transcription
+
+    voice = next((e for e in engines if hasattr(e, "synthesize")), None)
+    if voice is None:
+        return None
+    chunks = list(voice.synthesize(WARM_UP_SENTENCE))
+    audio = np.concatenate([resample(a, sr) for a, sr in chunks]) if chunks else np.zeros(16000, np.float32)
+    text, seconds = timed_transcription(transcriber, audio)
+    log.info("Warm-up transcription took %.2fs: %r", seconds, text)
+    say_to_user(f"  Speech recognition test: understood a sample sentence in {seconds:.1f}s")
+    if seconds > SLOW_TRANSCRIPTION_S:
+        memory = mac_memory_gb() if chip == "apple" else None
+        note = f" This Mac has {memory:.0f} GB of memory." if memory else ""
+        say_to_user("  That's slower than it should be, so replies will be slow." + note +
+                    " Quitting other apps (especially web browsers) usually helps.")
+    return seconds
 
 
 def _run(cfg: Config, wake: Any, vad: Any, transcriber: Any, speaker: Any) -> int:  # pragma: no cover - needs a Mac

@@ -67,15 +67,22 @@ class Microphone:
         """How many frames are waiting to be processed (each is 80 ms)."""
         return self._q.qsize()
 
-    def drop_backlog(self) -> int:
-        """Throw away waiting frames so JARVIS catches up with real time. Returns how many."""
-        dropped = 0
+    def drop_backlog(self, keep: int = 12) -> int:
+        """Throw away old waiting frames so JARVIS catches up with real time, keeping the newest
+        `keep` frames (~1 s) so a "hey Jarvis" you are in the middle of saying isn't lost."""
+        frames: list[np.ndarray] = []
         try:
             while True:
-                self._q.get_nowait()
-                dropped += 1
+                frames.append(self._q.get_nowait())
         except queue.Empty:
-            return dropped
+            pass
+        kept = frames[-keep:] if keep > 0 else []
+        for f in kept:
+            try:
+                self._q.put_nowait(f)
+            except queue.Full:
+                break
+        return len(frames) - len(kept)
 
     def stop(self) -> None:
         if self._stream is not None:
@@ -172,6 +179,17 @@ def load_silero_vad() -> Callable[[np.ndarray], float]:
 
     prob.reset = model.reset_states  # type: ignore[attr-defined]
     return prob
+
+
+def resample(audio: np.ndarray, rate_from: int, rate_to: int = SAMPLE_RATE) -> np.ndarray:
+    """Simple linear resampling (good enough for a warm-up sample, not for listening to)."""
+    audio = np.asarray(audio, dtype=np.float32).ravel()
+    if rate_from == rate_to or audio.size == 0:
+        return audio
+    n_out = int(round(audio.size * rate_to / rate_from))
+    x_old = np.linspace(0.0, 1.0, num=audio.size, endpoint=False)
+    x_new = np.linspace(0.0, 1.0, num=n_out, endpoint=False)
+    return np.interp(x_new, x_old, audio).astype(np.float32)
 
 
 def int16_to_float(frame: np.ndarray) -> np.ndarray:

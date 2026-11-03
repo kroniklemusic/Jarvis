@@ -208,3 +208,20 @@ def test_quiet_room_behaves_as_before():
     assert ep.feed(frame("speech")) == "speaking"
     results = [ep.feed(frame()) for _ in range(9)]
     assert results[-1] == "done"
+
+
+def test_resample_for_the_warm_up_sample():
+    from jarvis.audio import resample
+    out = resample(np.ones(24000, dtype=np.float32), 24000, 16000)
+    assert out.dtype == np.float32 and len(out) == 16000
+    assert resample(np.ones(5), 16000, 16000).tolist() == [1.0] * 5
+
+
+def test_catching_up_keeps_the_last_second_of_audio():
+    from jarvis.audio import Microphone
+    mic = Microphone()
+    for i in range(40):
+        mic._q.put(np.full(1280, i, dtype=np.int16))
+    assert mic.drop_backlog(keep=12) == 28
+    assert mic.backlog() == 12
+    assert int(mic.read()[0]) == 28          # oldest kept frame
