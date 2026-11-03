@@ -271,7 +271,8 @@ def build_and_run(cfg: Config, prepare_only: bool = False) -> int:  # pragma: no
     if not engines:
         say_to_user("None of the voices could start. Run ./setup.sh again.")
         return 1
-    say_to_user(f"  Voice in use: {engines[0].name}")
+    where = {"mps": " on the graphics chip", "cpu": " on the processor"}.get(getattr(engines[0], "device", ""), "")
+    say_to_user(f"  Voice in use: {engines[0].name}{where}")
 
     if prepare_only:
         say_to_user("All models are downloaded and ready.")

@@ -69,3 +69,71 @@ def test_push_to_talk_consume():
     p.pressed.set()
     assert p.consume() is True
     assert p.consume() is False
+
+
+# ------------------------------------------------------------ speaker stream reuse
+import threading  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from jarvis.audio import SoundDeviceOutput  # noqa: E402
+
+
+class FakeStream:
+    def __init__(self, samplerate, **kw):
+        self.rate, self.active, self.written, self.aborts, self.closed = samplerate, False, 0, 0, False
+
+    def start(self):
+        self.active = True
+
+    def write(self, data):
+        assert self.active
+        self.written += len(data)
+
+    def abort(self):
+        self.active = False
+        self.aborts += 1
+
+    def close(self):
+        self.closed = True
+
+
+class FakeSD:
+    def __init__(self):
+        self.opened = []
+
+    def OutputStream(self, **kw):
+        s = FakeStream(**kw)
+        self.opened.append(s)
+        return s
+
+
+def test_speaker_stream_stays_open_between_clips():
+    sd = FakeSD()
+    out = SoundDeviceOutput(sd)
+    stop = threading.Event()
+    out(np.zeros(2400, dtype=np.float32), 24000, stop)
+    out(np.zeros(2400, dtype=np.float32), 24000, stop)
+    assert len(sd.opened) == 1 and sd.opened[0].written == 4800
+
+
+def test_speaker_stream_reopens_for_a_new_sample_rate():
+    sd = FakeSD()
+    out = SoundDeviceOutput(sd)
+    stop = threading.Event()
+    out(np.zeros(100, dtype=np.float32), 24000, stop)
+    out(np.zeros(100, dtype=np.float32), 22050, stop)
+    assert [s.rate for s in sd.opened] == [24000, 22050] and sd.opened[0].closed
+
+
+def test_stop_discards_buffered_audio_and_stream_restarts_next_time():
+    sd = FakeSD()
+    out = SoundDeviceOutput(sd)
+    stop = threading.Event()
+    stop.set()
+    out(np.zeros(24000, dtype=np.float32), 24000, stop)
+    s = sd.opened[0]
+    assert s.aborts == 1 and s.written == 0 and not s.active
+    stop.clear()
+    out(np.zeros(1200, dtype=np.float32), 24000, stop)
+    assert s.active and s.written == 1200 and len(sd.opened) == 1

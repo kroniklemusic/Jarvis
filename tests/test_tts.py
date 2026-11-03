@@ -229,3 +229,87 @@ def test_slow_kokoro_hands_over_to_piper():
     assert prefer_fast_engine([k, p, s], Config(), measure=lambda e: 0.2) == [k, p, s]
     assert prefer_fast_engine([k, p, s], Config(auto_fast_voice=False), measure=lambda e: 1.4) == [k, p, s]
     assert prefer_fast_engine([k, s], Config(), measure=lambda e: 1.4) == [k, s]   # no piper to switch to
+
+
+# ------------------------------------------------------------ Kokoro device choice
+import subprocess  # noqa: E402
+
+from jarvis.tts import audio_is_sound, kokoro_devices, load_kokoro, performance_cores  # noqa: E402
+
+
+class FakeKokoro:
+    def __init__(self, device, audio=None, fail=False):
+        self.name, self.device, self.fail = "kokoro", device, fail
+        self.audio = np.full(100, 0.2, dtype=np.float32) if audio is None else audio
+        self.measured_ratio = None
+
+    def synthesize(self, text):
+        if self.fail:
+            raise RuntimeError("MPS op not supported")
+        yield self.audio, 24000
+
+    def stop(self):
+        pass
+
+
+def test_kokoro_devices_to_try():
+    assert kokoro_devices("auto", "apple", lambda: True) == ["mps", "cpu"]
+    assert kokoro_devices("auto", "apple", lambda: False) == ["cpu"]
+    assert kokoro_devices("auto", "intel", lambda: True) == ["cpu"]
+    assert kokoro_devices("cpu", "apple", lambda: True) == ["cpu"]
+    assert kokoro_devices("mps", "apple", lambda: True) == ["mps"]
+
+
+def test_kokoro_picks_the_faster_device():
+    speeds = {"mps": 0.08, "cpu": 0.6}
+    k = load_kokoro(Config(), "apple", make=FakeKokoro, mps_available=lambda: True,
+                    measure=lambda e: speeds[e.device])
+    assert k.device == "mps" and k.measured_ratio == 0.08
+    speeds = {"mps": 0.9, "cpu": 0.3}
+    k = load_kokoro(Config(), "apple", make=FakeKokoro, mps_available=lambda: True,
+                    measure=lambda e: speeds[e.device])
+    assert k.device == "cpu"
+
+
+def test_kokoro_skips_a_device_that_fails_or_gives_bad_audio():
+    def make(device):
+        if device == "mps":
+            return FakeKokoro(device, audio=np.full(100, np.nan, dtype=np.float32))
+        return FakeKokoro(device)
+    k = load_kokoro(Config(), "apple", make=make, mps_available=lambda: True, measure=lambda e: 0.4)
+    assert k.device == "cpu"
+    k = load_kokoro(Config(), "apple", make=lambda d: FakeKokoro(d, fail=(d == "mps")),
+                    mps_available=lambda: True, measure=lambda e: 0.4)
+    assert k.device == "cpu"
+
+
+def test_kokoro_raises_if_nothing_works():
+    import pytest
+    with pytest.raises(RuntimeError):
+        load_kokoro(Config(), "intel", make=lambda d: FakeKokoro(d, fail=True), measure=lambda e: 0.1)
+
+
+def test_audio_is_sound():
+    assert audio_is_sound([(np.full(10, 0.1), 24000)])
+    assert not audio_is_sound([])
+    assert not audio_is_sound([(np.zeros(10), 24000)])
+    assert not audio_is_sound([(np.array([0.1, np.inf]), 24000)])
+
+
+def test_performance_cores():
+    ok = lambda *a, **k: subprocess.CompletedProcess(a, 0, "4\n", "")  # noqa: E731
+    assert performance_cores(ok) == 4
+    bad = lambda *a, **k: subprocess.CompletedProcess(a, 1, "", "unknown oid")  # noqa: E731
+    assert performance_cores(bad) is None
+
+    def missing(*a, **k):
+        raise FileNotFoundError("sysctl")
+    assert performance_cores(missing) is None
+
+
+def test_slow_kokoro_check_reuses_startup_measurement():
+    k, p = FakeKokoro("cpu"), Named("piper")
+    k.measured_ratio = 0.9
+    calls = []
+    assert prefer_fast_engine([k, p], Config(), measure=lambda e: calls.append(e) or 0.1) == [p, k]
+    assert calls == []

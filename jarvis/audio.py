@@ -11,7 +11,7 @@ import logging
 import queue
 import subprocess
 import threading
-from typing import Callable, Iterator
+from typing import Any, Callable, Iterator
 
 import numpy as np
 
@@ -76,7 +76,7 @@ class Player:
 
     def __init__(self, backend: Callable[[np.ndarray, int, threading.Event], None] | None = None):
         self._stop = threading.Event()
-        self._backend = backend or _sounddevice_play
+        self._backend = backend or SoundDeviceOutput()
 
     def play(self, samples: np.ndarray, sample_rate: int) -> bool:
         """Blocks until finished. Returns False if it was stopped early."""
@@ -88,15 +88,49 @@ class Player:
         self._stop.set()
 
 
-def _sounddevice_play(samples: np.ndarray, sample_rate: int, stop: threading.Event) -> None:
-    import sounddevice as sd
+class SoundDeviceOutput:
+    """Keeps one speaker stream open between clips.
 
-    block = int(sample_rate * 0.05)
-    with sd.OutputStream(samplerate=sample_rate, channels=1, dtype="float32") as out:
+    Opening a new stream for every sentence adds a pause each time on macOS, so the stream stays
+    open and is only reopened if the sample rate changes (e.g. switching from Kokoro to Piper)."""
+
+    BLOCK_SECONDS = 0.05
+
+    def __init__(self, sd_module: Any = None):
+        self._sd = sd_module
+        self._stream = None
+        self._rate: int | None = None
+
+    def _open(self, rate: int):
+        if self._sd is None:
+            import sounddevice as sd
+            self._sd = sd
+        if self._stream is not None and self._rate == rate:
+            return self._stream
+        self.close()
+        self._stream = self._sd.OutputStream(samplerate=rate, channels=1, dtype="float32", latency="low")
+        self._rate = rate
+        return self._stream
+
+    def __call__(self, samples: np.ndarray, sample_rate: int, stop: threading.Event) -> None:
+        out = self._open(sample_rate)
+        if not out.active:
+            out.start()
+        block = max(1, int(sample_rate * self.BLOCK_SECONDS))
         for i in range(0, len(samples), block):
             if stop.is_set():
+                out.abort()          # throw away anything still buffered so speech stops at once
                 return
             out.write(samples[i:i + block].reshape(-1, 1))
+
+    def close(self) -> None:
+        if self._stream is not None:
+            try:
+                self._stream.abort()
+                self._stream.close()
+            except Exception:
+                pass
+        self._stream, self._rate = None, None
 
 
 def play_chime(enabled: bool = True) -> None:

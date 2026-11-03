@@ -22,6 +22,7 @@ def test_missing_file_uses_defaults(tmp_path):
     ("modle: opus", "don't recognise"),
     ("model: [oops", "couldn't read"),
     ("speech_speed: 9", "speech_speed"),
+    ("kokoro_device: gpu", "kokoro_device"),
 ])
 def test_bad_settings_give_plain_english_errors(tmp_path, text, words):
     p = tmp_path / "config.yaml"

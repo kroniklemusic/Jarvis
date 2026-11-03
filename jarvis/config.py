@@ -27,6 +27,7 @@ class Config:
     say_voice: str = "Daniel"
     speech_speed: float = 1.0
     auto_fast_voice: bool = True
+    kokoro_device: str = "auto"
     wake_threshold: float = 0.5
     hotkey: str = "<ctrl>+<alt>+j"
     follow_up_seconds: float = 8.0
@@ -64,6 +65,8 @@ class Config:
             raise ConfigError("'follow_up_seconds' can't be negative. Use 0 to turn follow-ups off.")
         if not 100 <= int(self.end_of_speech_silence_ms) <= 5000:
             raise ConfigError("'end_of_speech_silence_ms' should be between 100 and 5000.")
+        if self.kokoro_device not in ("auto", "cpu", "mps"):
+            raise ConfigError("'kokoro_device' must be auto, cpu or mps.")
         if not 0.5 <= float(self.speech_speed) <= 2.0:
             raise ConfigError("'speech_speed' should be between 0.5 and 2.0.")
         if float(self.listen_timeout_seconds) <= 0 or float(self.max_request_seconds) <= 0:

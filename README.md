@@ -204,6 +204,7 @@ explaining it. If you make a typo, JARVIS tells you which line is wrong when it 
 | `end_of_speech_silence_ms` | How long a pause ends your request. Raise it to `1000` if JARVIS cuts you off. |
 | `confirm_timeout_seconds` | How long it waits for "yes, proceed" or "no". |
 | `chime` | `false` turns off the *tink* sound. |
+| `kokoro_device` | Where the Kokoro voice runs. `auto` (default) tries the Apple Silicon graphics chip and the processor at startup and keeps the faster one. |
 | `auto_fast_voice` | If Kokoro is too slow on your Mac, JARVIS uses the faster Piper voice so replies start quickly. Set to `false` to always use Kokoro. |
 
 ## Optional: Google Workspace

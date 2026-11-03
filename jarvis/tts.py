@@ -99,13 +99,14 @@ class KokoroTTS:
     name = "kokoro"
     SAMPLE_RATE = 24_000
 
-    def __init__(self, voice: str, speed: float):
+    def __init__(self, voice: str, speed: float, device: str = "cpu"):
         from kokoro import KPipeline
 
         # lang_code 'b' = British English, matching the bm_/bf_ voices.
         lang = "b" if voice.startswith("b") else "a"
-        self._pipeline = KPipeline(lang_code=lang, repo_id="hexgrad/Kokoro-82M")
-        self.voice, self.speed = voice, speed
+        self._pipeline = KPipeline(lang_code=lang, repo_id="hexgrad/Kokoro-82M", device=device)
+        self.voice, self.speed, self.device = voice, speed, device
+        self.measured_ratio: float | None = None
         for _ in self.synthesize("Ready."):  # warm-up: loads (and first time downloads) the voice
             pass
 
@@ -178,16 +179,80 @@ def speed_ratio(engine: Any, clock: Callable[[], float] = time.monotonic) -> flo
     return (clock() - t0) / seconds if seconds else float("inf")
 
 
-def load_engines(names: list[str], cfg, notify: Callable[[str], None] | None = None) -> list[Any]:
+def performance_cores(run: Callable[..., subprocess.CompletedProcess] = subprocess.run) -> int | None:
+    """Number of fast ("performance") cores on an Apple Silicon Mac, or None if unknown."""
+    try:
+        out = run(["sysctl", "-n", "hw.perflevel0.physicalcpu"], capture_output=True, text=True, timeout=5)
+        n = int(out.stdout.strip())
+        return n if n > 0 else None
+    except Exception:
+        return None
+
+
+def audio_is_sound(chunks: list[tuple[np.ndarray, int]]) -> bool:
+    """True if the audio is real sound (not empty, silent or full of invalid numbers)."""
+    if not chunks:
+        return False
+    audio = np.concatenate([np.asarray(a, dtype=np.float32).ravel() for a, _ in chunks])
+    return audio.size > 0 and bool(np.isfinite(audio).all()) and float(np.abs(audio).max()) > 1e-3
+
+
+def kokoro_devices(setting: str, chip: str, mps_available: Callable[[], bool]) -> list[str]:
+    """Which devices to try for Kokoro, in order."""
+    if setting in ("cpu", "mps"):
+        return [setting]
+    return ["mps", "cpu"] if chip == "apple" and mps_available() else ["cpu"]
+
+
+def load_kokoro(cfg, chip: str, make: Callable[[str], Any] | None = None,
+                mps_available: Callable[[], bool] | None = None,
+                measure: Callable[[Any], float] | None = None) -> Any:
+    """Load Kokoro on the fastest device that produces correct audio on this Mac."""
+    if make is None:
+        import torch
+
+        if chip == "apple":
+            cores = performance_cores()
+            if cores:
+                torch.set_num_threads(cores)   # skip the slow efficiency cores
+                log.info("Kokoro: using %d performance cores on the processor", cores)
+        make = lambda device: KokoroTTS(cfg.kokoro_voice, cfg.speech_speed, device)  # noqa: E731
+        mps_available = mps_available or (lambda: bool(torch.backends.mps.is_available()))
+    measure = measure or speed_ratio
+    best, best_ratio = None, float("inf")
+    for device in kokoro_devices(getattr(cfg, "kokoro_device", "auto"), chip, mps_available or (lambda: False)):
+        try:
+            engine = make(device)
+            if not audio_is_sound(list(engine.synthesize("Testing."))):
+                raise RuntimeError("it produced silence or invalid audio")
+            ratio = measure(engine)
+        except Exception as exc:
+            log.warning("Kokoro on %s didn't work: %s", device, exc)
+            continue
+        log.info("Kokoro on %s: %.2f s of work per second of speech", device, ratio)
+        if ratio < best_ratio:
+            best, best_ratio = engine, ratio
+    if best is None:
+        raise RuntimeError("Kokoro could not run on this Mac")
+    best.measured_ratio = best_ratio
+    log.info("Kokoro will run on %s", best.device)
+    return best
+
+
+def load_engines(names: list[str], cfg, notify: Callable[[str], None] | None = None,
+                 chip: str | None = None) -> list[Any]:
     """Load each configured engine; skip (and log) any that fail to load.
 
     If cfg.auto_fast_voice is on and Kokoro turns out to be slow on this Mac, Piper is moved first
     so replies start quickly."""
+    from .stt import detect_chip
+
+    chip = chip or detect_chip()
     engines: list[Any] = []
     for name in names:
         try:
             if name == "kokoro":
-                engines.append(KokoroTTS(cfg.kokoro_voice, cfg.speech_speed))
+                engines.append(load_kokoro(cfg, chip))
             elif name == "piper":
                 engines.append(PiperTTS(cfg.piper_voice, cfg.piper_dir, cfg.speech_speed))
             elif name == "say":
@@ -203,7 +268,9 @@ def prefer_fast_engine(engines: list[Any], cfg, notify: Callable[[str], None] | 
     if not engines or not hasattr(engines[0], "synthesize"):
         return engines
     try:
-        ratio = measure(engines[0])
+        ratio = getattr(engines[0], "measured_ratio", None)
+        if ratio is None:
+            ratio = measure(engines[0])
     except Exception as exc:
         log.warning("Voice speed test failed: %s", exc)
         return engines
