@@ -111,8 +111,8 @@ def test_page_assets_load_without_the_token(server):
 
 def test_3d_modules_are_served_as_javascript(server):
     """Browsers refuse to run ES modules served with the wrong type."""
-    for name in ("scene.js", "reactor2d.js", "vendor/three/three.module.min.js", "vendor/three/three.core.min.js",
-                 "vendor/three/postprocessing/UnrealBloomPass.js", "vendor/three/shaders/OutputShader.js"):
+    for name in ("scene.js", "art.js", "reactor2d.js", "vendor/three/three.module.min.js",
+                 "vendor/three/three.core.min.js"):
         status, ctype, body = get(f"http://127.0.0.1:{server.port}/{name}")
         assert status == 200 and "javascript" in ctype, name
         assert len(body) > 100

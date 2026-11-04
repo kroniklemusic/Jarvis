@@ -18,11 +18,11 @@
       <span class="tagline">Just A Rather Very Intelligent System</span>
     </div>
     <div class="pills">
-      <button class="pill on" id="pill-mic" type="button" aria-pressed="false" title="Turn the microphone off or on">
+      <button class="status on" id="pill-mic" type="button" aria-pressed="false" title="Turn the microphone off or on">
         <i class="dot"></i><span id="pill-mic-text">Mic live</span></button>
-      <button class="pill on" id="pill-voice" type="button" aria-pressed="true" title="Speak answers out loud, or only show them">
+      <button class="status on" id="pill-voice" type="button" aria-pressed="true" title="Speak answers out loud, or only show them">
         <i class="dot"></i><span id="pill-voice-text">Voice on</span></button>
-      <span class="pill static" id="pill-link" title="Connection to JARVIS"><i class="dot"></i><span id="pill-link-text">Connecting</span></span>
+      <span class="status static" id="pill-link" title="Connection to JARVIS"><i class="dot"></i><span id="pill-link-text">Connecting</span></span>
     </div>
     <div class="topbar-right">
       <div class="clock"><span class="clock-time" id="clock-time">--:--:--</span><span class="clock-date" id="clock-date">&nbsp;</span></div>
@@ -55,11 +55,11 @@
   <aside class="panel diag" aria-label="Diagnostics">
     <header class="panel-head"><h2>Diagnostics</h2><span class="count" id="uptime">00:00:00</span></header>
     <div class="gauges">
-      <figure class="gauge" id="g-cpu"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="track" cx="50" cy="50" r="42"/><circle class="value" cx="50" cy="50" r="42"/></svg>
+      <figure class="gauge" id="g-cpu"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="grad" cx="50" cy="50" r="47"/><circle class="track" cx="50" cy="50" r="42"/><circle class="value" cx="50" cy="50" r="42"/></svg>
         <figcaption><b>--</b><span>CPU</span></figcaption></figure>
-      <figure class="gauge" id="g-mem"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="track" cx="50" cy="50" r="42"/><circle class="value" cx="50" cy="50" r="42"/></svg>
+      <figure class="gauge" id="g-mem"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="grad" cx="50" cy="50" r="47"/><circle class="track" cx="50" cy="50" r="42"/><circle class="value" cx="50" cy="50" r="42"/></svg>
         <figcaption><b>--</b><span>Memory</span></figcaption></figure>
-      <figure class="gauge" id="g-bat"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="track" cx="50" cy="50" r="42"/><circle class="value" cx="50" cy="50" r="42"/></svg>
+      <figure class="gauge" id="g-bat"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="grad" cx="50" cy="50" r="47"/><circle class="track" cx="50" cy="50" r="42"/><circle class="value" cx="50" cy="50" r="42"/></svg>
         <figcaption><b>--</b><span id="g-bat-label">Battery</span></figcaption></figure>
     </div>
     <div class="net">
@@ -163,7 +163,7 @@
     <section>
       <h3>Display</h3>
       <div class="segmented" id="set-quality" role="radiogroup" aria-label="Visual effects">
-        <button type="button" data-value="full" role="radio">Full effects</button>
+        <button type="button" data-value="full" role="radio">Full detail</button>
         <button type="button" data-value="lite" role="radio">Lite</button>
       </div>
       <p class="hint">Lite uses less of your Mac's graphics power.</p>
@@ -177,6 +177,7 @@
 
 <div class="toasts" id="toasts" aria-live="polite"></div>
 
+<script src="art.js"></script>
 <script src="reactor2d.js"></script>
 <script src="hud.js"></script>
 <script type="module" src="scene.js"></script>

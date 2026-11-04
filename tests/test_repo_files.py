@@ -176,7 +176,7 @@ STATIC = ROOT / "jarvis" / "hud" / "static"
 
 def test_display_works_offline():
     """Everything the display needs ships in the repo: no web fonts, CDNs or other downloads."""
-    for name in ("index.html", "hud.css", "hud.js", "scene.js", "reactor2d.js"):
+    for name in ("index.html", "hud.css", "hud.js", "scene.js", "art.js", "reactor2d.js"):
         text = (STATIC / name).read_text()
         assert not re.search(r"""(src|href)=["']https?://|url\(["']?https?://|import[^;]+from\s+["']https?://""", text), name
 
@@ -191,6 +191,17 @@ def test_bundled_threejs_is_complete_and_licensed():
         assert not re.search(r"""from\s*['"]three['"]""", text), f"{path.name} still imports 'three'"
         for spec in re.findall(r"""(?:from|import)\s*['"](\.{1,2}/[^'"]+)['"]""", text):
             assert (path.parent / spec).resolve().is_file(), f"{path.name} imports missing {spec}"
+
+
+def test_display_loads_every_script_it_needs():
+    """art.js must load before the 2D and 3D cores that draw with it."""
+    html = (STATIC / "index.html").read_text()
+    scripts = re.findall(r'<script[^>]*src="([^"]+)"', html)
+    assert scripts.index("art.js") < scripts.index("reactor2d.js") < scripts.index("scene.js")
+    for src in scripts:
+        assert (STATIC / src).is_file(), src
+    for name in ("scene.js", "reactor2d.js"):
+        assert "JARVIS_ART" in (STATIC / name).read_text()
 
 
 def test_app_icon_renders():

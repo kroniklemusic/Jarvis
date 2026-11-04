@@ -181,10 +181,10 @@ function setToggles(d) {
   if ("muted" in d) ui.muted = !!d.muted;
   if ("voice_replies" in d) ui.voice = !!d.voice_replies;
   const mic = $("pill-mic"), voice = $("pill-voice");
-  mic.className = `pill ${ui.muted ? "off" : "on"}`;
+  mic.className = `status ${ui.muted ? "off" : "on"}`;
   mic.setAttribute("aria-pressed", String(ui.muted));
   $("pill-mic-text").textContent = ui.muted ? "Mic off" : "Mic live";
-  voice.className = `pill ${ui.voice ? "on" : "off"}`;
+  voice.className = `status ${ui.voice ? "on" : "off"}`;
   voice.setAttribute("aria-pressed", String(ui.voice));
   $("pill-voice-text").textContent = ui.voice ? "Voice on" : "Voice off";
   $("set-voice-replies").checked = ui.voice;
@@ -215,7 +215,11 @@ function bootLine(text) {
 
 /* ------------------------------------------------------------------ panels */
 const TOOL_NAMES = { "macos-automator": "Mac control", playwright: "Browser", duckduckgo: "Web search", "google-workspace": "Google" };
+function readout(name, value) {             // small live figures printed on the 3D instrument
+  S.readouts = { ...(S.readouts || {}), [name]: value };
+}
 function applyConfig(d) {
+  readout("core", (d.model || "sonnet").toUpperCase());
   $("r-model").textContent = `Claude · ${titleCase(d.model || "sonnet")}`;
   const where = d.voice_device === "cpu" ? " · CPU" : d.voice_device === "mps" ? " · GPU" : "";
   const voiceName = (d.voice_detail || "").replace(/^[ab][mf]_/, "");
@@ -264,12 +268,18 @@ function spark(id, values, max) {
 function applyTelemetry(d) {
   if (d.uptime_s != null) ui.uptime = { s: d.uptime_s, at: performance.now() };
   gauge("g-cpu", d.cpu != null ? d.cpu / 100 : null, d.cpu != null ? `${Math.round(d.cpu)}%` : "--");
+  readout("cpu", d.cpu != null ? `${Math.round(d.cpu)}%` : "--");
+  if (d.memory) readout("mem", `${d.memory.used_gb} GB`);
+  if (d.net) readout("net", fmtRate(d.net.down_bps));
   if (d.memory) gauge("g-mem", d.memory.fraction, `${Math.round(d.memory.fraction * 100)}%`, `${d.memory.used_gb}/${Math.round(d.memory.total_gb)} GB`);
   if (d.battery) {
     gauge("g-bat", d.battery.percent / 100, `${d.battery.percent}%`, d.battery.charging ? "Charging" : "Battery");
+    // a full battery is good news: only a low, discharging one is flagged
+    $("g-bat").classList.toggle("warn", d.battery.percent > 10 && d.battery.percent <= 20 && !d.battery.charging);
     $("g-bat").classList.toggle("hot", d.battery.percent <= 10 && !d.battery.charging);
   } else {
     gauge("g-bat", 1, "AC", "Power");
+    $("g-bat").classList.remove("warn", "hot");
   }
   if (d.net) {
     ui.net.down.push(d.net.down_bps);
@@ -472,7 +482,7 @@ function receive(ev) {
 
 function setLink(status) {
   const pill = $("pill-link");
-  pill.className = `pill static ${status === "Online" || status === "Demo" ? "on" : status === "Link lost" ? "lost" : ""}`;
+  pill.className = `status static ${status === "Online" || status === "Demo" ? "on" : status === "Link lost" ? "lost" : ""}`;
   $("pill-link-text").textContent = status;
 }
 

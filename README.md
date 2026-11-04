@@ -94,17 +94,19 @@ The JARVIS window shows a boot screen while it loads (10 to 30 seconds). It's re
 
 ![The JARVIS display](docs/hud.jpg)
 
-**The holographic core** in the middle is a live 3D arc reactor, projected above a holographic floor.
-It reacts to your voice and to JARVIS's, and its colour shows what JARVIS is doing:
+**The core** in the middle is a holographic instrument: fine scales, rings and small live readouts
+(processor, memory, network and the Claude model), drawn in 3D on layered glass that shifts slightly
+as you move the mouse. A thin ring of bars and a waveform around the centre follow your voice and
+JARVIS's. Its colour shows what JARVIS is doing:
 
 | Colour | Meaning |
 |---|---|
-| Calm blue | **Standing by** |
-| Bright blue, particles flowing in | **Listening** |
+| Pale blue | **Standing by** |
+| Brighter blue, bars moving with your voice | **Listening** |
 | Violet | **Transcribing** your words |
-| Amber, spinning fast | **Processing** with Claude |
-| Pulsing blue | **Responding** |
-| Red | Waiting for your **authorisation** |
+| Amber, with a slow radar sweep | **Processing** with Claude |
+| Pale blue, bars moving with JARVIS's voice | **Responding** |
+| Red, with a dashed warning ring | Waiting for your **authorisation** |
 | Grey | Microphone **off** |
 
 Click the core to talk.
@@ -141,7 +143,7 @@ Click the core to talk.
 - the voice and speaking speed;
 - wake-word sensitivity and the follow-up window;
 - whether timings are shown;
-- **Lite** effects, if your Mac feels sluggish. Macs with 8 GB of memory start in Lite.
+- **Lite** display, if your Mac feels sluggish. Macs with 8 GB of memory start in Lite.
 
 **Authorisation Required**: when JARVIS needs your OK, a red panel appears, with a countdown.
 Click **Authorise** or **Deny**, press **Y** or **N**, or say "yes, proceed" or "no". If you're in
