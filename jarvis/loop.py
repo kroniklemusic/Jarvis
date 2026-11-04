@@ -75,7 +75,8 @@ class Jarvis:
                  chime: Callable[[bool], None] = play_chime, ui: Callable[[str], None] = say_to_user,
                  clock: Callable[[], float] = time.monotonic,
                  events: Callable[[str, dict], None] | None = None,
-                 commands: Callable[[], str | None] | None = None):
+                 commands: Callable[[], Any] | None = None,
+                 save_settings: Callable[[dict], None] | None = None):
         self.cfg, self.wake, self.endpointer = cfg, wake, endpointer
         self.transcriber, self.speaker, self.brain = transcriber, speaker, brain
         self.logger, self.hotkey, self.chime, self.ui = logger, hotkey, chime, ui
@@ -91,9 +92,12 @@ class Jarvis:
         self._listen_step_s: list[float] = []
         self._speak_lock = threading.Lock()   # makes "cancel" and "queue a sentence" atomic
         self.events = events                  # HUD: publish(kind, data)
-        self.commands = commands              # HUD: returns "talk" / "stop" / "yes" / "no" or None
+        self.commands = commands              # HUD: returns (name, payload) or None
+        self.save_settings = save_settings    # writes changed settings to config.yaml
         self._hud_state: tuple | None = None
         self._ui_talk = False
+        self.muted = False                    # microphone off: no wake word, no listening
+        self.voice_replies = True             # False: answers are shown but not spoken
 
     def _emit(self, kind: str, **data: Any) -> None:
         if self.events:
@@ -113,25 +117,43 @@ class Jarvis:
         return ("speaking" if self.speaker.is_speaking() else "thinking"), False
 
     # ------------------------------------------------------------ HUD buttons
-    def handle_command(self, name: str) -> None:
-        """A button or key press in the HUD. Runs on the main loop, like everything else."""
+    def emit_toggles(self) -> None:
+        self._emit("toggles", muted=self.muted, voice_replies=self.voice_replies)
+
+    def handle_command(self, name: str, payload: dict | None = None) -> None:
+        """A button, key, typed request or settings change from the HUD.
+
+        Runs on the main loop, like everything else, so it never races with the microphone."""
+        payload = payload or {}
         if name == "talk":
+            if self.muted:
+                self.set_muted(False)
             if self.state == IDLE:
                 self._ui_talk = True
             elif self.state == RESPONDING:
                 self.barge_in()
         elif name == "stop":
-            if self.state != IDLE:
-                with self._speak_lock:
-                    self._cancel.set()
-                    self.speaker.interrupt()
-                if self.pending:
-                    self.pending.resolve(False)
-                    self._emit("permission_done", allowed=False)
-                    self.pending = None
-                self.logger.log("stopped_from_hud")
-                self._go_idle()
-                self.ui("Stopped. Say \"hey Jarvis\" when you need me.")
+            self._stop_everything()
+        elif name == "ask" and payload.get("text"):
+            self.typed_request(str(payload["text"]))
+        elif name in ("mute", "unmute"):
+            self.set_muted(name == "mute")
+        elif name in ("voice_on", "voice_off"):
+            self.voice_replies = name == "voice_on"
+            if not self.voice_replies:
+                self.speaker.interrupt()      # stop talking now; text keeps coming
+            self.logger.log(name)
+            self.emit_toggles()
+        elif name == "new_conversation":
+            self._stop_everything(quiet=True)
+            new = getattr(self.brain, "new_conversation", None)
+            if callable(new):
+                new()
+            self.logger.log("new_conversation")
+            self._emit("cleared")
+            self.ui("Started a new conversation.")
+        elif name == "settings" and payload.get("values"):
+            self.apply_settings(payload["values"])
         elif name in ("yes", "no") and self.pending is not None and not self.pending.done.is_set():
             p, allowed = self.pending, name == "yes"
             self.logger.log("permission_reply", text=f"({name} button)", understood=allowed)
@@ -140,6 +162,77 @@ class Jarvis:
                 self.state = RESPONDING
             p.listening = False
             p.resolve(allowed)
+
+    def _stop_everything(self, quiet: bool = False) -> None:
+        if self.state == IDLE:
+            return
+        with self._speak_lock:
+            self._cancel.set()
+            self.speaker.interrupt()
+        if self.pending:
+            self.pending.resolve(False)
+            self._emit("permission_done", allowed=False)
+            self.pending = None
+        self.logger.log("stopped_from_hud")
+        self._go_idle()
+        if not quiet:
+            self.ui("Stopped. Say \"hey Jarvis\" when you need me.")
+
+    def set_muted(self, muted: bool) -> None:
+        self.muted = muted
+        if muted and self.state == LISTENING and not (self.pending and self.pending.listening):
+            self._go_idle()
+        self.logger.log("mute" if muted else "unmute")
+        self.emit_toggles()
+        self.ui("Microphone off. Type below, or press Talk to turn it back on." if muted
+                else "Microphone on.")
+
+    def typed_request(self, text: str) -> None:
+        """A request typed into the command bar: handled exactly like a spoken one."""
+        if self.pending is not None:
+            self._emit("notice", text="Please answer the authorisation question first.")
+            return
+        if self.state == RESPONDING:          # a new request replaces the current answer
+            with self._speak_lock:
+                self._cancel.set()
+                self.speaker.interrupt()
+        self.logger.log("typed", text=text)
+        self.timing = {"heard_at": self.clock(), "transcribe_s": 0.0, "typed": True}
+        self.ui(f"You: {text}")
+        self._emit("heard", text=text, typed=True)
+        self.start_response(text)
+
+    def apply_settings(self, values: dict) -> None:
+        """Settings changed in the HUD: apply them now and save them to config.yaml."""
+        from . import settings as settings_mod
+
+        for key, value in values.items():
+            setattr(self.cfg, key, value)
+        if "wake_threshold" in values and hasattr(self.wake, "threshold"):
+            self.wake.threshold = values["wake_threshold"]
+        for engine in getattr(self.speaker, "engines", []):
+            if "kokoro_voice" in values and hasattr(engine, "set_voice"):
+                engine.set_voice(values["kokoro_voice"])
+            if "speech_speed" in values and hasattr(engine, "set_speed"):
+                engine.set_speed(values["speech_speed"])
+        if "model" in values and hasattr(self.brain, "set_model"):
+            self.brain.set_model(values["model"])
+        saved = True
+        if self.save_settings:
+            try:
+                self.save_settings(values)
+            except Exception as exc:
+                saved = False
+                log.warning("Couldn't save settings: %s", exc)
+        self.logger.log("settings_changed", **values)
+        self._emit("settings", values=settings_mod.current(self.cfg), options=settings_mod.options())
+        engines = getattr(self.speaker, "engines", None)
+        if self.events and engines:
+            try:   # refresh the Systems panel (model, voice)
+                self._emit("config", **config_summary(self.cfg, engines, self.transcriber))
+            except Exception:
+                log.debug("couldn't refresh the HUD config", exc_info=True)
+        self.ui("Settings updated." if saved else "Settings updated for now, but couldn't be saved to config.yaml.")
 
     # ------------------------------------------------------------- transitions
     def _hotkey_pressed(self) -> bool:
@@ -190,13 +283,15 @@ class Jarvis:
     def step(self, frame: np.ndarray) -> None:
         """Process one 80 ms microphone frame."""
         if self.commands:
-            name = self.commands()
-            while name:
-                self.handle_command(name)
-                name = self.commands()
+            cmd = self.commands()
+            while cmd:
+                name, payload = cmd if isinstance(cmd, tuple) else (cmd, {})
+                self.handle_command(name, payload)
+                cmd = self.commands()
         if self.events:
             f = frame.astype(np.float32) / 32768.0 if frame.dtype == np.int16 else frame
-            self._emit("level", mic=round(float(np.sqrt(np.mean(f * f))) if len(f) else 0.0, 4))
+            level = 0.0 if self.muted or not len(f) else float(np.sqrt(np.mean(f * f)))
+            self._emit("level", mic=round(level, 4))
         if self.state == LISTENING:
             started = self.clock()
             self._step(frame)
@@ -213,19 +308,19 @@ class Jarvis:
         if self.state == IDLE:
             f = frame.astype(np.float32) / 32768.0 if frame.dtype == np.int16 else frame
             self._room.append(float(np.sqrt(np.mean(f * f))) if len(f) else 0.0)
-            woke = self.wake.process(frame)
+            woke = False if self.muted else self.wake.process(frame)
             if woke or self._hotkey_pressed():
                 self.logger.log("wake", source="wake_word" if woke else "hotkey")
                 self._go_listening(self.cfg.listen_timeout_seconds)
             return
 
         if self.state == RESPONDING:
-            woke = self.wake.process(frame)
+            woke = False if self.muted else self.wake.process(frame)
             if woke or self._hotkey_pressed():
                 self.barge_in()
                 return
             p = self.pending
-            if p and not p.listening and not p.done.is_set() and self._speaker_quiet():
+            if p and not p.listening and not p.done.is_set() and self._speaker_quiet() and not self.muted:
                 p.listening = True
                 self._go_listening(self.cfg.confirm_timeout_seconds)
                 self.ui("Waiting for you to say \"yes, proceed\" or \"no\"...")
@@ -260,6 +355,7 @@ class Jarvis:
             return
         answer = None
         if result == "done":
+            self._show_transcribing()
             heard = clean_transcript(self.transcriber.transcribe(self.endpointer.audio()))
             self.ui(f"You: {heard or '(unclear)'}")
             answer = parse_answer(heard)
@@ -271,15 +367,24 @@ class Jarvis:
         if answer is None:
             p.attempts += 1
             if result == "done" and p.attempts < 2:
-                self.speaker.say(REPROMPT)      # ask once more, then listen again
+                if self.voice_replies:
+                    self.speaker.say(REPROMPT)  # ask once more, then listen again
+                self._emit("notice", text=REPROMPT)
                 return
-            self.speaker.say("I'll take that as a no.")
+            if self.voice_replies:
+                self.speaker.say("I'll take that as a no.")
             answer = False
         self.pending = None
         p.resolve(answer)
 
+    def _show_transcribing(self) -> None:
+        """Tell the HUD right away: transcription blocks this loop for a moment."""
+        self._hud_state = ("transcribing", False)
+        self._emit("state", state="transcribing", follow_up=False)
+
     def _handle_utterance(self, audio: np.ndarray) -> None:
         started = self.clock()
+        self._show_transcribing()
         raw = self.transcriber.transcribe(audio)
         self.timing = {"heard_at": started, "transcribe_s": self.clock() - started,
                        **getattr(self.endpointer, "stats", {})}
@@ -307,7 +412,8 @@ class Jarvis:
         with self._speak_lock:
             if cancel.is_set() or not sentence:
                 return
-            self.speaker.say(sentence)
+            if self.voice_replies:
+                self.speaker.say(sentence)
             self.timing.setdefault("first_text_at", self.clock())
         self.ui(f"JARVIS: {sentence}")
         self._emit("said", text=sentence)
@@ -474,7 +580,7 @@ def config_summary(cfg: Config, engines: list, transcriber: Any) -> dict:
         "model": cfg.model, "voice": voice.name, "voice_detail": getattr(voice, "voice", "") or "",
         "voice_device": getattr(voice, "device", ""), "speech_model": getattr(transcriber, "model", ""),
         "hotkey": hotkey_label(cfg.hotkey), "tools": tools, "memory_gb": mac_memory_gb(),
-        "follow_up_seconds": cfg.follow_up_seconds,
+        "follow_up_seconds": cfg.follow_up_seconds, "confirm_timeout_seconds": cfg.confirm_timeout_seconds,
     }
 
 
@@ -573,10 +679,15 @@ def _run(cfg: Config, wake: Any, vad: Any, transcriber: Any, speaker: Any,
         return fatal(f"I can't use the microphone. Allow microphone access for {who} in "
                      "System Settings > Privacy & Security > Microphone, then start me again.")
 
+    from . import settings as settings_mod
+
     jarvis = Jarvis(cfg, wake, endpointer, transcriber, speaker, brain, logger, hotkey,
                     events=hud.publish if hud is not None else None,
-                    commands=hud.next_command if hud is not None else None)
+                    commands=hud.next_command if hud is not None else None,
+                    save_settings=settings_mod.save)
     if hud is not None:
+        hud.publish("settings", {"values": settings_mod.current(cfg), "options": settings_mod.options()})
+        jarvis.emit_toggles()
         _start_telemetry(hud, brain, mic)
     voice_log = speaker.on_timing
 
@@ -608,28 +719,52 @@ def _run(cfg: Config, wake: Any, vad: Any, transcriber: Any, speaker: Any,
     return 0
 
 
-def _start_telemetry(hud: Any, brain: Any, mic: Any, every_s: float = 2.0) -> None:  # pragma: no cover - Mac
-    """Every few seconds, tell the HUD how the Mac and JARVIS are doing."""
+def telemetry_snapshot(brain: Any, mic: Any, started: float, rate: Any) -> dict:
+    """One reading of how the Mac and JARVIS are doing, for the HUD's diagnostics panel."""
     import os
 
+    from .hud import sysinfo
     from .stt import swap_used_gb
 
-    started = time.monotonic()
+    try:
+        load = os.getloadavg()[0]
+    except OSError:
+        load = None
+    return {
+        "uptime_s": round(time.monotonic() - started), "load": load, "cores": os.cpu_count(),
+        "cpu": sysinfo.cpu_percent(), "memory": sysinfo.memory(), "swap_gb": swap_used_gb(),
+        "battery": sysinfo.battery(), "net": rate.update(sysinfo.network_bytes()), "disk": sysinfo.disk(),
+        "claude_online": bool(brain.alive()), "behind_s": round(mic.backlog() * 0.08, 1),
+    }
+
+
+def _start_telemetry(hud: Any, brain: Any, mic: Any, every_s: float = 2.0) -> None:  # pragma: no cover - Mac
+    """Every few seconds, tell the HUD how the Mac and JARVIS are doing."""
+    from .hud.sysinfo import NetworkRate
+
+    started, rate = time.monotonic(), NetworkRate()
 
     def loop() -> None:
         while True:
             try:
-                load = os.getloadavg()[0]
-            except OSError:
-                load = None
-            hud.publish("telemetry", {
-                "uptime_s": round(time.monotonic() - started), "load": load,
-                "cores": os.cpu_count(), "swap_gb": swap_used_gb(),
-                "claude_online": bool(brain.alive()), "behind_s": round(mic.backlog() * 0.08, 1),
-            })
+                hud.publish("telemetry", telemetry_snapshot(brain, mic, started, rate))
+            except Exception:
+                log.debug("telemetry failed", exc_info=True)
             time.sleep(every_s)
 
     threading.Thread(target=loop, name="hud-telemetry", daemon=True).start()
+
+
+def hide_from_dock() -> None:  # pragma: no cover - macOS only
+    """The engine runs inside JARVIS.app; make sure it never shows a second icon in the Dock."""
+    if sys.platform != "darwin":
+        return
+    try:
+        from AppKit import NSApplication   # part of PyObjC, installed with pynput
+
+        NSApplication.sharedApplication().setActivationPolicy_(2)   # 2 = "prohibited": no Dock icon
+    except Exception:
+        log.debug("couldn't hide from the Dock", exc_info=True)
 
 
 def start_hud(open_browser: bool = False):  # pragma: no cover - exercised on a Mac
@@ -641,6 +776,7 @@ def start_hud(open_browser: bool = False):  # pragma: no cover - exercised on a 
     from .hud.server import HudServer
 
     global HUD_PUBLISH
+    hide_from_dock()
     bus = EventBus()
     server = HudServer(bus).start()
     HUD_PUBLISH = bus.publish

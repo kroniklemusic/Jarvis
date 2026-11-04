@@ -96,12 +96,16 @@ class HudServer:
                     return self._send(403, b"Forbidden")
                 if urlparse(self.path).path != "/command":
                     return self._send(404, b"Not found")
-                length = min(int(self.headers.get("Content-Length") or 0), 4096)
+                length = int(self.headers.get("Content-Length") or 0)
+                if length > 16384:
+                    return self._send(413, b"Too large")
                 try:
-                    name = json.loads(self.rfile.read(length) or b"{}").get("command", "")
-                except (ValueError, AttributeError):
-                    name = ""
-                ok = server.bus.command(str(name))
+                    body = json.loads(self.rfile.read(length) or b"{}")
+                except ValueError:
+                    body = None
+                if not isinstance(body, dict):
+                    return self._send(400, b"Bad request")
+                ok = server.bus.command(str(body.get("command", "")), body)
                 return self._send(200 if ok else 400, b"ok" if ok else b"unknown command")
 
             def _events(self):

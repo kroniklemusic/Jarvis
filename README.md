@@ -92,23 +92,68 @@ The JARVIS window shows a boot screen while it loads (10 to 30 seconds). It's re
 
 ### The JARVIS display
 
-![The JARVIS display](docs/hud.png)
+![The JARVIS display](docs/hud.jpg)
 
-- **The arc reactor** in the middle shows what JARVIS is doing, and moves with your voice and its own:
-  - blue and calm means **Standing By**;
-  - bright blue means **Listening**;
-  - amber and spinning means **Processing**;
-  - pulsing means **Responding**;
-  - red means it's waiting for your **authorisation**.
-- **Comms Log** (left) is the conversation, plus each tool JARVIS uses.
-- **Systems** (right) shows the time, which Claude model and voice are in use, how busy your Mac is,
-  and a status light for each part of JARVIS.
-- **Buttons** along the bottom:
-  - **Talk** (or press **Space**) works like saying "hey Jarvis";
-  - **Stop** (or press **Esc**) cancels whatever JARVIS is doing;
-  - **Latency** shows how long the last answer took at each step.
-- When JARVIS needs your OK, an **Authorisation Required** panel appears. Click **Authorise** or
-  **Deny**, press **Y** or **N**, or just say "yes, proceed" or "no".
+**The holographic core** in the middle is a live 3D arc reactor, projected above a holographic floor.
+It reacts to your voice and to JARVIS's, and its colour shows what JARVIS is doing:
+
+| Colour | Meaning |
+|---|---|
+| Calm blue | **Standing by** |
+| Bright blue, particles flowing in | **Listening** |
+| Violet | **Transcribing** your words |
+| Amber, spinning fast | **Processing** with Claude |
+| Pulsing blue | **Responding** |
+| Red | Waiting for your **authorisation** |
+| Grey | Microphone **off** |
+
+Click the core to talk.
+
+**Comms** (left panel) is the conversation:
+- JARVIS's replies type out as it speaks. Hover over one to **Copy** it.
+- Each tool JARVIS uses shows a spinner, then a tick when it's done. Small timings under each answer
+  show how long it took.
+- **New** starts a fresh conversation.
+
+**Diagnostics** (right panel) has live readings from your Mac:
+- dials for processor, memory and battery;
+- a network speed graph and free disk space;
+- live microphone and voice levels;
+- which Claude model, voice and speech model are in use;
+- status lights for the wake word and the Claude connection;
+- the tools JARVIS can use. Each one lights up while it's in use.
+
+**The command bar** (bottom):
+- **Type** a request and press Return. It's handled exactly like a spoken one, and is handy in a
+  noisy room.
+- **Quick actions** above it ask common questions in one click: weather, your day, headlines,
+  unread email.
+- **Talk** (the microphone, or **Space**) works like saying "hey Jarvis".
+- **Stop** (**Esc**) cancels whatever JARVIS is doing.
+
+**The switches** at the top:
+- **Mic live / Mic off** turns listening off completely (pressing Talk turns it back on).
+- **Voice on / Voice off** makes JARVIS answer silently, on screen only.
+
+**Settings** (the gear icon, or press **,**) changes these straight away and saves them to
+`config.yaml`:
+- the Claude model (Haiku, Sonnet or Opus);
+- the voice and speaking speed;
+- wake-word sensitivity and the follow-up window;
+- whether timings are shown;
+- **Lite** effects, if your Mac feels sluggish. Macs with 8 GB of memory start in Lite.
+
+**Authorisation Required**: when JARVIS needs your OK, a red panel appears, with a countdown.
+Click **Authorise** or **Deny**, press **Y** or **N**, or say "yes, proceed" or "no". If you're in
+another app, JARVIS's Dock icon bounces to get your attention.
+
+**Keyboard:**
+- **Space**: talk
+- **Esc**: stop
+- **/**: type a command
+- **,**: open Settings
+- **Y** / **N**: answer an authorisation request
+- **Control + Command + F**: full screen
 
 **Without the app:** you can also run JARVIS in Terminal, with plain text instead of the display:
 ```bash
@@ -284,6 +329,8 @@ It checks each of these and tells you how to fix anything that fails:
 | What you see or hear | What to do |
 |---|---|
 | "I can't use the microphone" | Turn on **JARVIS** (or Terminal, if you run it from Terminal) under System Settings → Privacy & Security → Microphone, then quit and reopen JARVIS. |
+| Spotlight or Launchpad shows **two** JARVIS apps | Older versions left a second copy inside the jarvis folder. Run `cd ~/jarvis && git pull && ./app/build-app.sh`. It removes the extra copy and keeps a single JARVIS in Applications. |
+| The display feels slow or your Mac's fans spin up | Open Settings (gear icon) → Display → **Lite**. |
 | JARVIS doesn't appear in Applications / setup says "The app couldn't be built" | Install Apple's command line tools with `xcode-select --install`, then run `./app/build-app.sh`. Until then, start JARVIS from Terminal with `.venv/bin/python -m jarvis`. |
 | The JARVIS window says "JARVIS can't continue" | The message says what's wrong. Click **Open Logs Folder** for details (`app.log` and `jarvis.log`), or run `./doctor.sh`. |
 | The JARVIS window stays on "Starting engine" | Wait up to a minute the first time. If it never changes, quit, then run `./doctor.sh` in Terminal. |
@@ -347,6 +394,8 @@ Then drag **JARVIS** from your Applications folder to the Bin, and drag the `jar
 8. **JARVIS.app** is a small native Mac program (`app/main.swift`). It starts all of the above and
    shows the display. The display is a web page (`jarvis/hud/static/`) served only to this Mac by
    JARVIS. Its live feed and buttons are protected by a random password that changes every launch.
+   The 3D core is drawn with [three.js](https://threejs.org) (free and open source, MIT licence),
+   which is bundled in `jarvis/hud/static/vendor/three/`, so nothing is downloaded at run time.
 
 ## For developers
 
@@ -367,7 +416,10 @@ Package layout: `jarvis/audio.py` (mic, speaker, end-of-speech), `wake.py`, `stt
 `config.py`, `logs.py`, `doctor.py` (health check), `hud/` (display: event bus, local server, web
 page, app icon). The app shell is `app/main.swift`, built by `app/build-app.sh`.
 
-To preview the display without JARVIS running, open `jarvis/hud/static/index.html?demo=1` in a
-browser. Add `&scene=listening`, `thinking`, `speaking`, `confirm` or `boot` to freeze one state.
+To preview the display without JARVIS running, serve the folder and open the demo:
+`cd jarvis/hud/static && python3 -m http.server 8765`, then visit
+`http://127.0.0.1:8765/?demo=1`. The 3D modules need a web address; opening the file directly won't
+load them. Add `&scene=` with `boot`, `standby`, `muted`, `listening`, `transcribing`, `thinking`,
+`speaking`, `confirm` or `settings` to freeze one moment.
 To run JARVIS with the display in your web browser instead of the app, use
 `.venv/bin/python -m jarvis --app --browser`.

@@ -182,3 +182,30 @@ def test_memory_is_handed_to_claude_at_startup(tmp_path):
     assert "--append-system-prompt" not in build_command(Config(), memory_file=tmp_path / "missing.md")
     facts.write_text("x" * 9000 + "NEWEST")
     assert memory_prompt(facts).endswith("NEWEST")      # very long files keep the newest facts
+
+
+def test_changing_model_restarts_claude_and_keeps_the_conversation(cfg, tmp_path, monkeypatch):
+    brain, record, _ = make_brain(cfg, tmp_path, monkeypatch)
+    try:
+        list(brain.ask("hello"))
+        brain.set_model("opus")
+        assert brain.cfg.model == "opus"
+        evs = list(brain.ask("hello again"))
+        assert isinstance(evs[-1], TurnDone)
+        runs = [r for r in launches(record) if "argv" in r]
+        assert len(runs) == 2 and runs[1]["argv"][-2:] == ["--resume", "00000000-0000-4000-8000-000000000001"]
+    finally:
+        brain.stop()
+
+
+def test_new_conversation_starts_fresh(cfg, tmp_path, monkeypatch):
+    brain, record, _ = make_brain(cfg, tmp_path, monkeypatch)
+    try:
+        list(brain.ask("hello"))
+        brain.new_conversation()
+        evs = list(brain.ask("hello again"))
+        assert isinstance(evs[-1], TurnDone)
+        runs = [r for r in launches(record) if "argv" in r]
+        assert len(runs) == 2 and "--resume" not in runs[1]["argv"]
+    finally:
+        brain.stop()

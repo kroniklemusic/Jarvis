@@ -43,7 +43,35 @@ def test_only_known_commands_are_accepted():
     bus = EventBus()
     assert bus.command("talk") and bus.command("yes")
     assert not bus.command("rm -rf /")
-    assert [bus.next_command(), bus.next_command(), bus.next_command()] == ["talk", "yes", None]
+    assert [bus.next_command(), bus.next_command(), bus.next_command()] == [("talk", {}), ("yes", {}), None]
+
+
+def test_typed_requests_are_cleaned_and_limited():
+    bus = EventBus()
+    assert not bus.command("ask", {"text": "   "})
+    assert not bus.command("ask", {"text": 42})
+    assert bus.command("ask", {"text": "  What's   the\nweather? ", "extra": "ignored"})
+    assert bus.next_command() == ("ask", {"text": "What's the weather?"})
+    assert bus.command("ask", {"text": "x" * 5000})
+    assert len(bus.next_command()[1]["text"]) == 2000
+
+
+def test_settings_commands_only_carry_valid_settings():
+    bus = EventBus()
+    assert not bus.command("settings", {"values": {"claude_command": "rm"}})     # not editable
+    assert not bus.command("settings", {"values": {"model": "gpt"}})             # not a choice
+    assert bus.command("settings", {"values": {"model": "opus", "wake_threshold": 5, "x": 1}})
+    assert bus.next_command() == ("settings", {"values": {"model": "opus", "wake_threshold": 0.9}})
+
+
+def test_new_conversation_clears_history_for_late_viewers():
+    bus = EventBus()
+    bus.publish("heard", {"text": "old"})
+    bus.publish("cleared", {})
+    bus.publish("heard", {"text": "new"})
+    _, snapshot = bus.subscribe()
+    texts = [e["data"].get("text") for e in snapshot if e["kind"] == "heard"]
+    assert texts == ["new"]
 
 
 # ------------------------------------------------------------------- web server
@@ -81,6 +109,15 @@ def test_page_assets_load_without_the_token(server):
         assert status == 200
 
 
+def test_3d_modules_are_served_as_javascript(server):
+    """Browsers refuse to run ES modules served with the wrong type."""
+    for name in ("scene.js", "reactor2d.js", "vendor/three/three.module.min.js", "vendor/three/three.core.min.js",
+                 "vendor/three/postprocessing/UnrealBloomPass.js", "vendor/three/shaders/OutputShader.js"):
+        status, ctype, body = get(f"http://127.0.0.1:{server.port}/{name}")
+        assert status == 200 and "javascript" in ctype, name
+        assert len(body) > 100
+
+
 def test_server_serves_the_hud_files(server):
     status, ctype, body = get(server.url)
     assert status == 200 and ctype.startswith("text/html") and b"J.A.R.V.I.S." in body
@@ -104,7 +141,9 @@ def test_buttons_post_commands(server):
         with urllib.request.urlopen(req, timeout=5) as r:
             return r.status
     assert post({"command": "stop"}) == 200
-    assert server.bus.next_command() == "stop"
+    assert server.bus.next_command() == ("stop", {})
+    assert post({"command": "ask", "text": "Hello there"}) == 200
+    assert server.bus.next_command() == ("ask", {"text": "Hello there"})
     with pytest.raises(urllib.error.HTTPError) as e:
         post({"command": "format disk"})
     assert e.value.code == 400

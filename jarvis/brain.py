@@ -210,6 +210,7 @@ class ClaudeBrain:
         self._lock = threading.Lock()
         self._write_lock = threading.Lock()
         self._open_permissions: dict[str, PermissionRequest] = {}   # asked, not yet answered
+        self._restart_pending = False   # a new model or a new conversation takes effect next request
 
     # -- process lifecycle
     def start(self) -> None:
@@ -289,6 +290,16 @@ class ClaudeBrain:
         except (BrokenPipeError, OSError, ValueError):
             return False
 
+    def set_model(self, model: str) -> None:
+        """Use a different Claude model from the next request on, keeping the conversation."""
+        self.cfg.model = model
+        self._restart_pending = True
+
+    def new_conversation(self) -> None:
+        """Forget the current conversation; the next request starts a fresh one."""
+        self.session_id = None
+        self._restart_pending = True
+
     def answer_permission(self, req: PermissionRequest, allow: bool) -> None:
         if self._open_permissions.pop(req.request_id, None) is None and req.request_id:
             return   # already answered (e.g. declined automatically after an interruption)
@@ -336,6 +347,10 @@ class ClaudeBrain:
     def ask(self, text: str) -> Iterator[Event]:
         """Send one request and yield events until the answer is finished."""
         with self._lock:
+            if self._restart_pending:
+                self._restart_pending = False
+                if self.proc is not None:
+                    self.stop(graceful=False)   # restarted below: new model, or a fresh conversation
             if self._in_turn and self.alive():
                 self._finish_abandoned_turn()
             if not self.alive():

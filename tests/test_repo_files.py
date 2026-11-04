@@ -164,6 +164,33 @@ def test_swift_app_and_python_agree_on_their_messages():
     assert '"--app"' in loop
     assert "ANTHROPIC_" in swift                     # the app also strips API keys
     assert "127.0.0.1" in swift and "127.0.0.1" in (ROOT / "jarvis" / "hud" / "server.py").read_text()
+    # The display can ask the app to bounce the Dock icon or go full screen, and nothing else.
+    hud = (ROOT / "jarvis" / "hud" / "static" / "hud.js").read_text()
+    assert 'userContentController.add(self, name: "jarvis")' in swift
+    for action in ("attention", "fullscreen"):
+        assert f'case "{action}":' in swift and f'postToApp("{action}")' in hud
+
+
+STATIC = ROOT / "jarvis" / "hud" / "static"
+
+
+def test_display_works_offline():
+    """Everything the display needs ships in the repo: no web fonts, CDNs or other downloads."""
+    for name in ("index.html", "hud.css", "hud.js", "scene.js", "reactor2d.js"):
+        text = (STATIC / name).read_text()
+        assert not re.search(r"""(src|href)=["']https?://|url\(["']?https?://|import[^;]+from\s+["']https?://""", text), name
+
+
+def test_bundled_threejs_is_complete_and_licensed():
+    vendor = STATIC / "vendor" / "three"
+    assert "MIT License" in (vendor / "LICENSE").read_text()
+    assert "0.185.1" in (vendor / "README.md").read_text()
+    modules = [STATIC / "scene.js", *vendor.rglob("*.js")]
+    for path in modules:
+        text = path.read_text()
+        assert not re.search(r"""from\s*['"]three['"]""", text), f"{path.name} still imports 'three'"
+        for spec in re.findall(r"""(?:from|import)\s*['"](\.{1,2}/[^'"]+)['"]""", text):
+            assert (path.parent / spec).resolve().is_file(), f"{path.name} imports missing {spec}"
 
 
 def test_app_icon_renders():
@@ -182,3 +209,51 @@ def test_app_icon_renders():
     assert data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) > 1000
     out.unlink()
     assert np.isfinite(img).all()
+
+
+def test_build_leaves_exactly_one_app(fake_mac):
+    """Older builds left a copy in build/, so Spotlight and Launchpad showed JARVIS twice."""
+    tmp, home, env = fake_mac
+    bin_dir = tmp / "bin"
+    fakes = {
+        # swiftc ... -o OUTPUT main.swift  -> writes a pretend program
+        "swiftc": 'while [ "$#" -gt 0 ]; do if [ "$1" = "-o" ]; then echo binary > "$2"; fi; shift; done',
+        "sips": 'cp "$4" "$6"',                  # sips -z H W INPUT --out OUTPUT
+        "iconutil": 'touch "$5"',                # iconutil -c icns DIR -o OUTPUT
+        "codesign": "exit 0",
+        "plutil": "exit 0",
+        "ditto": 'cp -R "$1" "$2"',
+    }
+    for name, body in fakes.items():
+        (bin_dir / name).write_text(f"#!/bin/sh\n{body}\n")
+        (bin_dir / name).chmod(0o755)
+    env = {**env, "TMPDIR": str(tmp)}
+    venv_py = ROOT / ".venv" / "bin" / "python"
+    created = not venv_py.exists()
+    if created:                                   # stands in for JARVIS's own Python (needs numpy)
+        venv_py.parent.mkdir(parents=True, exist_ok=True)
+        venv_py.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+        venv_py.chmod(0o755)
+    leftover = ROOT / "build" / "JARVIS.app"
+    (leftover / "Contents").mkdir(parents=True, exist_ok=True)       # what older versions left behind
+    try:
+        r = subprocess.run(["bash", str(ROOT / "app" / "build-app.sh")], env=env, capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        installed = home / "Applications" / "JARVIS.app"
+        assert (installed / "Contents" / "MacOS" / "JARVIS").read_text().strip() == "binary"
+        assert (installed / "Contents" / "Resources" / "AppIcon.icns").exists()
+        info = plistlib.loads((installed / "Contents" / "Info.plist").read_bytes())
+        assert info["JARVISRepoPath"] == str(ROOT)
+        assert not leftover.exists()                                  # the second copy is gone
+        assert (ROOT / "build" / ".metadata_never_index").exists()    # build folder hidden from Spotlight
+        assert not list(tmp.glob("jarvis-build.*"))                   # temporary build folder cleaned up
+        apps = [p for p in tmp.rglob("JARVIS.app") if p.is_dir()]
+        assert apps == [installed]
+        assert (ROOT / "build" / "installed-path").read_text().strip() == str(installed)
+    finally:
+        import shutil
+        shutil.rmtree(ROOT / "build" / "JARVIS.app", ignore_errors=True)
+        for name in ("installed-path", "swiftc.log", ".metadata_never_index"):
+            (ROOT / "build" / name).unlink(missing_ok=True)
+        if created:
+            shutil.rmtree(ROOT / ".venv")

@@ -348,3 +348,106 @@ def test_tool_labels():
     assert tool_label("mcp__duckduckgo__search") == "DuckDuckGo: search"
     assert tool_label("mcp__playwright__browser_click") == "Browser: click"
     assert tool_label("Bash") == "Bash"
+
+
+# ------------------------------------------------------------ command bar & toggles
+def test_typed_request_gets_a_full_answer(hud_jarvis):
+    j = hud_jarvis()
+    j.bus.command("ask", {"text": "say hello"})
+    j.step(frame())
+    assert j.state == RESPONDING
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)
+    assert j.engine.spoken == ["Hello there.", "How are you today?"]
+    events = drain(j.q)
+    heard = next(e for e in events if e["kind"] == "heard")
+    assert heard["data"] == {"text": "say hello", "typed": True}
+    assert "typed" in log_kinds(j)
+
+
+def test_typed_request_replaces_the_current_answer(hud_jarvis):
+    j = hud_jarvis("Say hello.", engine_seconds=1.0)
+    j.step(frame("wake"))
+    speak_request(j)
+    assert wait_for(j.speaker.is_speaking)
+    j.engine.seconds = 0
+    j.bus.command("ask", {"text": "read the note"})
+    j.step(frame())
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)
+    assert j.engine.spoken[-1] == "The colour is teal."
+    assert "Hello there." not in j.engine.spoken
+
+
+def test_muted_microphone_ignores_the_wake_word_until_talk_is_pressed(hud_jarvis):
+    j = hud_jarvis("hello")
+    j.bus.command("mute")
+    j.step(frame())
+    assert j.muted
+    j.step(frame("wake"))
+    assert j.state == IDLE
+    assert any(e["kind"] == "toggles" and e["data"]["muted"] for e in drain(j.q))
+    j.bus.command("talk")                       # pressing Talk turns the microphone back on
+    j.step(frame())
+    assert not j.muted and j.state == LISTENING
+
+
+def test_muting_while_listening_stops_listening(hud_jarvis):
+    j = hud_jarvis("hello")
+    j.step(frame("wake"))
+    assert j.state == LISTENING
+    j.bus.command("mute")
+    j.step(frame())
+    assert j.state == IDLE
+
+
+def test_voice_off_shows_answers_without_speaking(hud_jarvis):
+    j = hud_jarvis()
+    j.bus.command("voice_off")
+    j.bus.command("ask", {"text": "say hello"})
+    j.step(frame())
+    assert pump(j, lambda: j.state == LISTENING and j.follow_up)
+    assert j.engine.spoken == []
+    said = [e["data"]["text"] for e in drain(j.q) if e["kind"] == "said"]
+    assert said == ["Hello there.", "How are you today?"]
+
+
+def test_new_conversation_button(hud_jarvis):
+    j = hud_jarvis()
+    calls = []
+    j.brain.new_conversation = lambda: calls.append("new")
+    j.bus.command("new_conversation")
+    j.step(frame())
+    assert calls == ["new"]
+    assert any(e["kind"] == "cleared" for e in drain(j.q))
+
+
+def test_settings_from_the_hud_apply_live_and_are_saved(hud_jarvis):
+    j = hud_jarvis()
+    voice_calls, saved = [], []
+
+    class Tunable(FakeEngine):
+        def set_voice(self, v):
+            voice_calls.append(("voice", v))
+
+        def set_speed(self, s):
+            voice_calls.append(("speed", s))
+
+    j.speaker.engines.insert(0, Tunable())
+    j.save_settings = saved.append
+    j.bus.command("settings", {"values": {"model": "opus", "kokoro_voice": "bf_emma",
+                                          "speech_speed": 1.2, "wake_threshold": 0.7}})
+    j.step(frame())
+    assert j.cfg.model == "opus" and j.brain.cfg.model == "opus"
+    assert j.wake.threshold == 0.7
+    assert ("voice", "bf_emma") in voice_calls and ("speed", 1.2) in voice_calls
+    assert saved == [{"model": "opus", "kokoro_voice": "bf_emma", "speech_speed": 1.2, "wake_threshold": 0.7}]
+    ev = next(e for e in drain(j.q) if e["kind"] == "settings")
+    assert ev["data"]["values"]["model"] == "opus" and ev["data"]["options"]["voices"]
+
+
+def test_hud_is_told_when_transcription_starts(hud_jarvis):
+    j = hud_jarvis("hello")
+    j.step(frame("wake"))
+    speak_request(j)
+    states = [e["data"]["state"] for e in drain(j.q) if e["kind"] == "state"]
+    assert "transcribing" in states
+    assert states.index("transcribing") > states.index("listening")

@@ -18,7 +18,7 @@ final class DragStrip: NSView {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScriptMessageHandler {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var engine: Process?
@@ -81,6 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         container.autoresizingMask = [.width, .height]
 
         let config = WKWebViewConfiguration()
+        // Lets the display ask for a few app-level things (see userContentController below).
+        config.userContentController.add(self, name: "jarvis")
         webView = WKWebView(frame: container.bounds, configuration: config)
         webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = self
@@ -267,6 +269,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     }
 
     // MARK: - Web view
+
+    /// Messages from the display: "attention" bounces the Dock icon (JARVIS needs your OK while
+    /// you're in another app); "fullscreen" toggles full screen. Nothing else is accepted.
+    func userContentController(_ userContentController: WKUserContentController,
+                               didReceive message: WKScriptMessage) {
+        guard message.name == "jarvis",
+              let body = message.body as? [String: Any],
+              let action = body["action"] as? String else {
+            return
+        }
+        switch action {
+        case "attention":
+            if !NSApp.isActive {
+                NSApp.requestUserAttention(.criticalRequest)
+            }
+        case "fullscreen":
+            window.toggleFullScreen(nil)
+        default:
+            break
+        }
+    }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         window.makeFirstResponder(webView)   // so Space and Esc reach the interface

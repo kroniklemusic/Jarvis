@@ -7,106 +7,178 @@
 <link rel="stylesheet" href="hud.css">
 </head>
 <body class="state-boot">
-<div class="backdrop" aria-hidden="true"><div class="grid"></div><div class="scan"></div><div class="vignette"></div></div>
+<canvas id="scene" aria-hidden="true"></canvas>
+<canvas id="scene2d" aria-hidden="true" hidden></canvas>
+<div class="frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
 
-<header class="topbar">
-  <div class="brand">
-    <span class="wordmark">J.A.R.V.I.S.</span>
-    <span class="tagline">Just A Rather Very Intelligent System</span>
-  </div>
-  <div class="topbar-right">
-    <span class="link" id="link"><i class="dot"></i><span id="link-text">CONNECTING</span></span>
-    <span class="clock-small" id="clock-small">--:--:--</span>
-  </div>
-</header>
-
-<main class="layout">
-  <section class="panel comms" aria-label="Conversation">
-    <h2><span>Comms Log</span><em id="comms-count">0</em></h2>
-    <div class="log" id="log" role="log" aria-live="polite"></div>
-  </section>
-
-  <section class="core" aria-label="Status">
-    <div class="reactor-wrap">
-      <canvas id="reactor" aria-hidden="true"></canvas>
-      <div class="reactor-label">
-        <div class="state-name" id="state-name">Initialising</div>
-        <div class="state-sub" id="state-sub">Bringing systems online</div>
-      </div>
+<div class="hud">
+  <header class="topbar">
+    <div class="brand">
+      <span class="wordmark">J.A.R.V.I.S.</span>
+      <span class="tagline">Just A Rather Very Intelligent System</span>
     </div>
-    <div class="caption" id="caption" aria-live="polite"></div>
+    <div class="pills">
+      <button class="pill on" id="pill-mic" type="button" aria-pressed="false" title="Turn the microphone off or on">
+        <i class="dot"></i><span id="pill-mic-text">Mic live</span></button>
+      <button class="pill on" id="pill-voice" type="button" aria-pressed="true" title="Speak answers out loud, or only show them">
+        <i class="dot"></i><span id="pill-voice-text">Voice on</span></button>
+      <span class="pill static" id="pill-link" title="Connection to JARVIS"><i class="dot"></i><span id="pill-link-text">Connecting</span></span>
+    </div>
+    <div class="topbar-right">
+      <div class="clock"><span class="clock-time" id="clock-time">--:--:--</span><span class="clock-date" id="clock-date">&nbsp;</span></div>
+      <button class="icon-btn" id="btn-fullscreen" type="button" title="Full screen" aria-label="Full screen">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+      <button class="icon-btn" id="btn-settings" type="button" title="Settings (,)" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
+    </div>
+  </header>
+
+  <aside class="panel comms" aria-label="Conversation">
+    <header class="panel-head">
+      <h2>Comms</h2>
+      <div class="head-actions">
+        <span class="count" id="comms-count">000</span>
+        <button class="mini-btn" id="btn-new" type="button" title="Start a new conversation">New</button>
+      </div>
+    </header>
+    <div class="log" id="log" role="log" aria-live="polite"></div>
+  </aside>
+
+  <section class="stage" aria-live="polite">
+    <div class="state-block">
+      <div class="state-name" id="state-name">Initialising</div>
+      <div class="state-sub" id="state-sub">Bringing systems online</div>
+      <div class="caption" id="caption"></div>
+    </div>
   </section>
 
-  <section class="panel systems" aria-label="Systems">
-    <h2><span>Systems</span><em id="uptime">00:00:00</em></h2>
-    <div class="clock-big" id="clock-big">--:--</div>
-    <div class="date" id="date">&nbsp;</div>
-    <dl class="readouts">
-      <div><dt>AI Core</dt><dd id="r-model">Claude</dd></div>
+  <aside class="panel diag" aria-label="Diagnostics">
+    <header class="panel-head"><h2>Diagnostics</h2><span class="count" id="uptime">00:00:00</span></header>
+    <div class="gauges">
+      <figure class="gauge" id="g-cpu"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="track" cx="50" cy="50" r="42"/><circle class="value" cx="50" cy="50" r="42"/></svg>
+        <figcaption><b>--</b><span>CPU</span></figcaption></figure>
+      <figure class="gauge" id="g-mem"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="track" cx="50" cy="50" r="42"/><circle class="value" cx="50" cy="50" r="42"/></svg>
+        <figcaption><b>--</b><span>Memory</span></figcaption></figure>
+      <figure class="gauge" id="g-bat"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="track" cx="50" cy="50" r="42"/><circle class="value" cx="50" cy="50" r="42"/></svg>
+        <figcaption><b>--</b><span id="g-bat-label">Battery</span></figcaption></figure>
+    </div>
+    <div class="net">
+      <div class="net-head"><span>Network</span><span><i class="down">&#9660;</i> <b id="net-down">--</b> &nbsp; <i class="up">&#9650;</i> <b id="net-up">--</b></span></div>
+      <svg class="spark" viewBox="0 0 200 44" preserveAspectRatio="none" aria-hidden="true">
+        <polyline id="spark-down" points=""/><polyline id="spark-up" points=""/></svg>
+    </div>
+    <div class="meter"><span>Disk</span><div class="bar"><i id="m-disk"></i></div><b id="m-disk-v">--</b></div>
+    <div class="meter"><span>Mic in</span><div class="bar"><i id="m-mic"></i></div><b id="m-mic-v">--</b></div>
+    <div class="meter"><span>Voice out</span><div class="bar"><i id="m-out"></i></div><b id="m-out-v">--</b></div>
+    <h3>Systems</h3>
+    <dl class="rows">
+      <div><dt>AI core</dt><dd id="r-model">&mdash;</dd></div>
       <div><dt>Voice</dt><dd id="r-voice">&mdash;</dd></div>
       <div><dt>Speech</dt><dd id="r-speech">&mdash;</dd></div>
-      <div><dt>Memory</dt><dd id="r-memory">&mdash;</dd></div>
+      <div><dt>Wake word</dt><dd id="r-wake"><i class="dot"></i><span>&mdash;</span></dd></div>
+      <div><dt>Claude link</dt><dd id="r-link"><i class="dot"></i><span>&mdash;</span></dd></div>
     </dl>
-    <div class="meter"><label>CPU Load</label><div class="bar"><i id="m-load"></i></div><span id="m-load-v">&mdash;</span></div>
-    <div class="meter"><label>Mic Input</label><div class="bar"><i id="m-mic"></i></div><span id="m-mic-v">&mdash;</span></div>
-    <div class="meter"><label>Voice Out</label><div class="bar"><i id="m-out"></i></div><span id="m-out-v">&mdash;</span></div>
-    <h3>Subsystems</h3>
-    <ul class="subsystems" id="subsystems">
-      <li data-key="wake"><i class="dot"></i>Wake word</li>
-      <li data-key="speech"><i class="dot"></i>Speech recognition</li>
-      <li data-key="voice"><i class="dot"></i>Voice synthesis</li>
-      <li data-key="claude"><i class="dot"></i>Claude uplink</li>
-    </ul>
     <h3>Tools</h3>
     <ul class="tools" id="tools"><li class="muted">&mdash;</li></ul>
-  </section>
-</main>
+  </aside>
 
-<footer class="footer">
-  <div class="controls">
-    <button id="btn-talk" class="btn primary" type="button" aria-keyshortcuts="Space">
-      <span class="icon">&#9673;</span>Talk<kbd>Space</kbd></button>
-    <button id="btn-stop" class="btn" type="button" aria-keyshortcuts="Escape">
-      <span class="icon">&#9632;</span>Stop<kbd>Esc</kbd></button>
-  </div>
-  <div class="latency" id="latency">Latency &mdash; awaiting first exchange</div>
-  <div class="hint" id="hint">Say &ldquo;hey Jarvis&rdquo;</div>
-</footer>
+  <footer class="dock">
+    <div class="chips" id="chips" aria-label="Quick actions"></div>
+    <form class="command" id="command-form" autocomplete="off">
+      <button type="button" class="cmd-btn talk" id="btn-talk" title="Talk (Space)" aria-label="Talk">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/></svg></button>
+      <input id="command-input" type="text" maxlength="2000" spellcheck="true"
+             placeholder="Type a command, or press Space to talk…" aria-label="Type a command for JARVIS">
+      <button type="submit" class="cmd-btn send" id="btn-send" title="Send (Return)" aria-label="Send">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M13 6l6 6-6 6"/></svg></button>
+      <button type="button" class="cmd-btn stop" id="btn-stop" title="Stop (Esc)" aria-label="Stop">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg></button>
+    </form>
+    <div class="latency" id="latency">Latency &mdash; awaiting first exchange</div>
+  </footer>
+</div>
 
 <div class="overlay boot" id="boot" aria-live="polite">
+  <div class="boot-title"><span class="wordmark">J.A.R.V.I.S.</span><span>System boot sequence</span></div>
   <div class="boot-box">
-    <div class="boot-title">System Boot</div>
     <ol class="boot-steps" id="boot-steps">
-      <li data-step="1">Wake word</li>
-      <li data-step="2">Speech detector</li>
-      <li data-step="3">Speech recognition</li>
-      <li data-step="4">Voice</li>
+      <li data-step="1"><span>Wake word</span><em></em></li>
+      <li data-step="2"><span>Speech detector</span><em></em></li>
+      <li data-step="3"><span>Speech recognition</span><em></em></li>
+      <li data-step="4"><span>Voice synthesis</span><em></em></li>
     </ol>
     <div class="boot-bar"><i id="boot-bar"></i></div>
     <div class="boot-lines" id="boot-lines"></div>
   </div>
 </div>
 
-<div class="overlay confirm hidden" id="confirm" role="alertdialog" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+<div class="overlay confirm hidden" id="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
   <div class="confirm-box">
-    <div class="confirm-title" id="confirm-title">Authorisation Required</div>
-    <div class="confirm-tool" id="confirm-tool"></div>
+    <div class="confirm-top">
+      <svg class="countdown" viewBox="0 0 100 100" aria-hidden="true"><circle class="track" cx="50" cy="50" r="44"/><circle class="value" id="countdown-ring" cx="50" cy="50" r="44"/></svg>
+      <span class="countdown-num" id="countdown-num">15</span>
+      <div>
+        <div class="confirm-title" id="confirm-title">Authorisation required</div>
+        <div class="confirm-tool" id="confirm-tool"></div>
+      </div>
+    </div>
     <p class="confirm-text" id="confirm-text"></p>
     <div class="confirm-actions">
-      <button class="btn approve" id="btn-yes" type="button">Authorise<kbd>Y</kbd></button>
-      <button class="btn deny" id="btn-no" type="button">Deny<kbd>N</kbd></button>
+      <button class="btn approve" id="btn-yes" type="button">Authorise <kbd>Y</kbd></button>
+      <button class="btn deny" id="btn-no" type="button">Deny <kbd>N</kbd></button>
     </div>
-    <div class="confirm-hint">Or say &ldquo;yes, proceed&rdquo; or &ldquo;no&rdquo;</div>
+    <div class="confirm-hint">Or say &ldquo;yes, proceed&rdquo; or &ldquo;no&rdquo;. No answer counts as no.</div>
   </div>
 </div>
 
-<div class="overlay fatal hidden" id="fatal" role="alertdialog">
-  <div class="confirm-box">
-    <div class="confirm-title">System Fault</div>
-    <p class="confirm-text" id="fatal-text"></p>
-  </div>
+<div class="overlay fatal hidden" id="fatal" role="alertdialog" aria-modal="true">
+  <div class="confirm-box"><div class="confirm-title">System fault</div><p class="confirm-text" id="fatal-text"></p></div>
 </div>
 
+<aside class="drawer" id="drawer" aria-label="Settings" aria-hidden="true">
+  <header class="drawer-head"><h2>Settings</h2><button class="icon-btn" id="btn-close-settings" type="button" aria-label="Close settings">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
+  <div class="drawer-body">
+    <section>
+      <h3>AI core</h3>
+      <div class="segmented" id="set-model" role="radiogroup" aria-label="Claude model"></div>
+      <p class="hint">Haiku answers fastest; Opus thinks hardest. The conversation carries on either way.</p>
+    </section>
+    <section>
+      <h3>Voice</h3>
+      <label class="field"><span>Voice</span><select id="set-voice"></select></label>
+      <label class="field"><span>Speaking speed <b id="set-speed-v">1.00×</b></span>
+        <input type="range" id="set-speed" min="0.7" max="1.5" step="0.05"></label>
+      <label class="switch"><input type="checkbox" id="set-voice-replies"><span>Speak answers out loud</span></label>
+    </section>
+    <section>
+      <h3>Listening</h3>
+      <label class="field"><span>Wake-word sensitivity <b id="set-wake-v">50%</b></span>
+        <input type="range" id="set-wake" min="0" max="100" step="5"></label>
+      <p class="hint">Higher hears "hey Jarvis" more easily; lower means fewer false alarms.</p>
+      <label class="field"><span>Follow-up window <b id="set-follow-v">8 s</b></span>
+        <input type="range" id="set-follow" min="0" max="20" step="1"></label>
+      <label class="switch"><input type="checkbox" id="set-timings"><span>Show timing after each answer</span></label>
+    </section>
+    <section>
+      <h3>Display</h3>
+      <div class="segmented" id="set-quality" role="radiogroup" aria-label="Visual effects">
+        <button type="button" data-value="full" role="radio">Full effects</button>
+        <button type="button" data-value="lite" role="radio">Lite</button>
+      </div>
+      <p class="hint">Lite uses less of your Mac's graphics power.</p>
+    </section>
+  </div>
+  <footer class="drawer-foot">
+    <button class="btn" id="btn-cancel-settings" type="button">Cancel</button>
+    <button class="btn primary" id="btn-save-settings" type="button">Save</button>
+  </footer>
+</aside>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="reactor2d.js"></script>
 <script src="hud.js"></script>
+<script type="module" src="scene.js"></script>
 </body>
 </html>

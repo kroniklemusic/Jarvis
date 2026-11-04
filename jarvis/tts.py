@@ -105,15 +105,32 @@ class KokoroTTS:
         # lang_code 'b' = British English, matching the bm_/bf_ voices.
         lang = "b" if voice.startswith("b") else "a"
         self._pipeline = KPipeline(lang_code=lang, repo_id="hexgrad/Kokoro-82M", device=device)
+        self._lang = lang
         self.voice, self.speed, self.device = voice, speed, device
         self.measured_ratio: float | None = None
         for _ in self.synthesize("Ready."):  # warm-up: loads (and first time downloads) the voice
             pass
 
     def synthesize(self, text: str) -> Iterator[tuple[np.ndarray, int]]:
-        for result in self._pipeline(text, voice=self.voice, speed=self.speed):
+        pipeline, voice, speed = self._pipeline, self.voice, self.speed   # a sentence keeps its settings
+        for result in pipeline(text, voice=voice, speed=speed):
             if result.audio is not None:
                 yield result.audio.detach().cpu().numpy(), self.SAMPLE_RATE
+
+    def set_voice(self, voice: str) -> None:
+        """Switch voice. British and American voices need different pronunciation rules."""
+        lang = "b" if voice.startswith("b") else "a"
+        if lang != self._lang:
+            from kokoro import KPipeline
+            # Reuse the loaded voice model; only the pronunciation rules change.
+            self._pipeline = KPipeline(lang_code=lang, repo_id="hexgrad/Kokoro-82M", model=self._pipeline.model)
+            self._lang = lang
+        self.voice = voice
+        # Load (and the first time, download) the new voice now, so the next reply doesn't wait.
+        threading.Thread(target=lambda: list(self.synthesize("Ready.")), daemon=True, name="voice-warmup").start()
+
+    def set_speed(self, speed: float) -> None:
+        self.speed = speed
 
     def stop(self) -> None:
         pass
@@ -130,11 +147,15 @@ class PiperTTS:
         if not model.exists():
             raise FileNotFoundError(f"Piper voice file not found: {model}. Run ./setup.sh again.")
         self._voice = PiperVoice.load(model)
+        self._config_class = SynthesisConfig
         self._syn = SynthesisConfig(length_scale=1.0 / speed)
 
     def synthesize(self, text: str) -> Iterator[tuple[np.ndarray, int]]:
         for chunk in self._voice.synthesize(text, syn_config=self._syn):
             yield chunk.audio_float_array, chunk.sample_rate
+
+    def set_speed(self, speed: float) -> None:
+        self._syn = self._config_class(length_scale=1.0 / speed)
 
     def stop(self) -> None:
         pass
@@ -155,6 +176,9 @@ class SayTTS:
         self._runner = runner
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
+
+    def set_speed(self, speed: float) -> None:
+        self.rate = int(180 * speed)
 
     def speak(self, text: str) -> None:
         with self._lock:
