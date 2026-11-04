@@ -94,20 +94,23 @@ The JARVIS window shows a boot screen while it loads (10 to 30 seconds). It's re
 
 ![The JARVIS display](docs/hud.jpg)
 
-**The core** in the middle is a holographic instrument: fine scales, rings and small live readouts
-(processor, memory, network and the Claude model), drawn in 3D on layered glass that shifts slightly
-as you move the mouse. A thin ring of bars and a waveform around the centre follow your voice and
-JARVIS's. Its colour shows what JARVIS is doing:
+**The core** in the middle is a realistic 3D model of a machined power core: a brushed titanium
+housing, copper coils, a glass lens over a bright emitter and an engraved bezel, lit like a studio
+product shot. It turns slightly as you move the mouse. It's also an instrument:
+- its light follows what JARVIS is doing, and pulses with your voice and JARVIS's;
+- the ring of lights round the face is a live sound meter while you or JARVIS speak;
+- the bezel ticks round while Claude is working;
+- four callouts show live readings: processor, memory, network and the Claude model.
 
 | Colour | Meaning |
 |---|---|
 | Pale blue | **Standing by** |
-| Brighter blue, bars moving with your voice | **Listening** |
+| Brighter blue, the light ring rising with your voice | **Listening** |
 | Violet | **Transcribing** your words |
-| Amber, with a slow radar sweep | **Processing** with Claude |
-| Pale blue, bars moving with JARVIS's voice | **Responding** |
-| Red, with a dashed warning ring | Waiting for your **authorisation** |
-| Grey | Microphone **off** |
+| Amber, with lights chasing round and the bezel ticking | **Processing** with Claude |
+| Pale blue, the light ring moving with JARVIS's voice | **Responding** |
+| Red, pulsing | Waiting for your **authorisation** |
+| Dim grey | Microphone **off** |
 
 Click the core to talk.
 
@@ -396,7 +399,7 @@ Then drag **JARVIS** from your Applications folder to the Bin, and drag the `jar
 8. **JARVIS.app** is a small native Mac program (`app/main.swift`). It starts all of the above and
    shows the display. The display is a web page (`jarvis/hud/static/`) served only to this Mac by
    JARVIS. Its live feed and buttons are protected by a random password that changes every launch.
-   The 3D core is drawn with [three.js](https://threejs.org) (free and open source, MIT licence),
+   The 3D core is modelled and drawn with [three.js](https://threejs.org) (free and open source, MIT licence),
    which is bundled in `jarvis/hud/static/vendor/three/`, so nothing is downloaded at run time.
 
 ## For developers

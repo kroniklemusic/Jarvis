@@ -59,6 +59,17 @@ body::before { content: ""; position: fixed; inset: 0; z-index: 1; pointer-event
 .frame i:nth-child(3) { bottom: 0; left: 0; border-right: 0; border-top: 0; }
 .frame i:nth-child(4) { bottom: 0; right: 0; border-left: 0; border-top: 0; }
 
+/* live readings pinned to the 3D core with leader lines (drawn by scene.js) */
+.callouts { position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 1s; }
+.callouts.shown { opacity: 1; }
+.callouts svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.callouts polyline { fill: none; stroke: rgba(var(--accent-rgb), 0.42); stroke-width: 1; transition: stroke 0.8s; }
+.callouts circle { fill: var(--bg); stroke: rgba(var(--accent-rgb), 0.9); stroke-width: 1; }
+.callout { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); text-transform: uppercase; white-space: nowrap; will-change: transform; }
+.callout.right { align-items: flex-end; }
+.callout span { font-size: 8.5px; letter-spacing: 0.2em; color: var(--text-dim); }
+.callout b { font-size: 15px; font-weight: 300; letter-spacing: 0.04em; color: var(--text-bright); font-variant-numeric: tabular-nums; }
+
 /* ------------------------------------------------------------------ layout */
 .hud {
   position: fixed; inset: 0; z-index: 2;
