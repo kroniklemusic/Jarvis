@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 import platform
 import re
 import subprocess
 import time
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 import numpy as np
 
@@ -65,22 +66,93 @@ class Transcriber(Protocol):
 # isn't confident, repeating all the work each time - far too slow for a voice assistant.
 TEMPERATURE = 0.0
 
+GB = 1024 ** 3
+# After each request MLX keeps the memory it used in reserve for next time. By default that reserve
+# may grow to several GB, which on an 8 GB Mac pushes everything else (the voice, Claude, your apps)
+# out to the disk and makes the whole Mac slow. A small reserve is plenty for speech recognition.
+SPARE_MEMORY_BYTES = 256 * 1024 ** 2
+
+
+class MlxMemory:
+    """Keeps speech recognition's memory use small, and its model in memory while JARVIS waits.
+
+    Without this, macOS moves the idle model out to the disk on a Mac that's short of memory, and
+    the next request has to wait while it's read back in (seconds, sometimes much longer)."""
+
+    def __init__(self, core: Any):
+        self.mx = core
+
+    @classmethod
+    def create(cls) -> "MlxMemory | None":
+        try:
+            import mlx.core as core
+        except ImportError:
+            return None
+        return cls(core)
+
+    def limit_spare(self) -> None:
+        self.mx.set_cache_limit(SPARE_MEMORY_BYTES)
+
+    def model_bytes(self) -> int:
+        """Size of the speech model mlx-whisper has loaded, in bytes (0 if unknown)."""
+        from mlx.utils import tree_flatten
+
+        holder = importlib.import_module("mlx_whisper.transcribe").ModelHolder
+        if holder.model is None:
+            return 0
+        return int(sum(v.nbytes for _, v in tree_flatten(holder.model.parameters())))
+
+    def keep_resident(self, model_bytes: int) -> int:
+        """Ask macOS to keep the model in memory (macOS 15 or later; older versions ignore it).
+
+        Returns the number of bytes kept resident, or 0."""
+        self.mx.clear_cache()
+        ceiling = int(self.mx.device_info().get("max_recommended_working_set_size", 0) or 0)
+        if not ceiling or model_bytes <= 0:
+            return 0
+        limit = min(model_bytes + SPARE_MEMORY_BYTES, ceiling // 2)
+        self.mx.set_wired_limit(limit)
+        return limit
+
+    def stats(self) -> dict:
+        return {"in_use_gb": round(self.mx.get_active_memory() / GB, 2),
+                "spare_gb": round(self.mx.get_cache_memory() / GB, 2)}
+
 
 class MlxWhisper:
-    def __init__(self, model: str, mlx_module=None):
+    def __init__(self, model: str, mlx_module=None, memory: MlxMemory | None = None):
         if mlx_module is None:
             import mlx_whisper as mlx_module
 
         self._mlx = mlx_module
         self.model = model
+        self.memory = memory if memory is not None else MlxMemory.create()
+        self.resident_bytes = 0
+        self.last_memory: dict = {}
+        self._guard("limit spare memory", lambda: self.memory.limit_spare())
         # Warm up once so the model is loaded (and downloaded if needed) at startup.
         self.transcribe(np.zeros(16_000, dtype=np.float32))
+        self.resident_bytes = self._guard(
+            "keep the model in memory", lambda: self.memory.keep_resident(self.memory.model_bytes())) or 0
+        if self.resident_bytes:
+            log.info("Speech model kept in memory: %.2f GB", self.resident_bytes / GB)
+
+    def _guard(self, what: str, action: Callable[[], Any]) -> Any:
+        """Memory tuning only makes things faster; if it fails, carry on without it."""
+        if self.memory is None:
+            return None
+        try:
+            return action()
+        except Exception as exc:
+            log.warning("Speech recognition couldn't %s: %s", what, exc)
+            return None
 
     def transcribe(self, audio: np.ndarray) -> str:
         result = self._mlx.transcribe(
             audio.astype(np.float32), path_or_hf_repo=self.model, language=LANGUAGE,
             condition_on_previous_text=False, verbose=None, temperature=TEMPERATURE,
         )
+        self.last_memory = self._guard("measure memory", lambda: self.memory.stats()) or {}
         return str(result.get("text", "")).strip()
 
 

@@ -95,7 +95,7 @@ def test_full_turn_wake_listen_answer_follow_up(make_jarvis):
     assert j.engine.spoken == ["Hello there.", "How are you today?"]
     assert "You: Say hello to me." in j.ui_lines
     # the last sentence has no trailing space, so it is spoken when the turn result arrives
-    assert log_kinds(j) == ["wake", "user", "spoken", "assistant", "spoken", "turn_timing"]
+    assert log_kinds(j) == ["wake", "transcribed", "user", "spoken", "assistant", "spoken", "turn_timing"]
 
 
 def test_follow_up_needs_no_wake_word_then_times_out(make_jarvis, cfg):
@@ -118,7 +118,7 @@ def test_hallucinated_transcript_is_dropped(make_jarvis):
     speak_request(j)
     assert j.state == IDLE
     assert j.engine.spoken == []
-    assert log_kinds(j) == ["wake", "dropped_transcript"]
+    assert log_kinds(j) == ["wake", "transcribed", "dropped_transcript"]
 
 
 def test_silence_after_wake_returns_to_idle(make_jarvis, cfg):
@@ -451,3 +451,59 @@ def test_hud_is_told_when_transcription_starts(hud_jarvis):
     states = [e["data"]["state"] for e in drain(j.q) if e["kind"] == "state"]
     assert "transcribing" in states
     assert states.index("transcribing") > states.index("listening")
+
+
+class SlowTranscriber(FakeTranscriber):
+    """Pretends each transcription takes `seconds`, by moving a fake clock forward."""
+
+    def __init__(self, clock, seconds, *texts):
+        super().__init__(*texts)
+        self.clock, self.seconds = clock, seconds
+        self.last_memory = {"in_use_gb": 0.6, "spare_gb": 0.1}
+
+    def transcribe(self, audio):
+        self.clock.now += self.seconds
+        return super().transcribe(audio)
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def test_slow_speech_recognition_is_explained_once(make_jarvis):
+    j = make_jarvis()
+    clock = FakeClock()
+    j.clock = clock
+    j.transcriber = SlowTranscriber(clock, 12.0, "Hello.", "Hello again.")
+    j.swap_gb = lambda: 2.4
+    notices = []
+    j.events = lambda kind, data: notices.append(data["text"]) if kind == "notice" else None
+    j.step(frame("wake"))
+    speak_request(j)
+    assert any("took 12 seconds" in n and "2.4 GB" in n and "Quitting other apps" in n for n in notices)
+    entry = [json.loads(l) for l in j.logger.path.read_text().splitlines() if '"transcribed"' in l][0]
+    assert entry["seconds"] == 12.0 and entry["swap_gb"] == 2.4 and entry["in_use_gb"] == 0.6
+    # a second slow one soon after isn't announced again
+    j._go_idle()
+    j.step(frame("wake"))
+    speak_request(j)
+    assert sum("took 12 seconds" in n for n in notices) == 1
+
+
+def test_quick_speech_recognition_is_only_logged(make_jarvis):
+    j = make_jarvis()
+    clock = FakeClock()
+    j.clock = clock
+    j.transcriber = SlowTranscriber(clock, 0.4, "Hello.")
+    checked = []
+    j.swap_gb = lambda: checked.append(1) or 0.0
+    notices = []
+    j.events = lambda kind, data: notices.append(data["text"]) if kind == "notice" else None
+    j.step(frame("wake"))
+    speak_request(j)
+    assert not any("took" in n for n in notices)
+    assert not checked                      # memory is only checked when something was slow

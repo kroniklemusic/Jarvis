@@ -230,6 +230,7 @@ function applyConfig(d) {
   // Macs with 8 GB or less start in Lite mode (unless you chose a mode in Settings),
   // leaving more of the machine for speech recognition and the voice.
   if (d.memory_gb && d.memory_gb <= 8.5 && !loadPref("quality", "")) S.quality = "lite";
+  S.lowMemory = !!(d.memory_gb && d.memory_gb <= 8.5);
   const tools = $("tools");
   tools.textContent = "";
   (d.tools || []).forEach((t) => {

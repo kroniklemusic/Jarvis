@@ -196,6 +196,7 @@ function start() {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.transmissionResolutionScale = 0.5;   // the lens refraction needn't be full size
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
 
   const scene = new THREE.Scene();
@@ -488,10 +489,11 @@ function start() {
   }
 
   // ---------------------------------------------------------------- sizing and quality
-  let quality = null, distance = 8, viewKey = '';
+  let quality = null, lowMemory, distance = 8, viewKey = '';
   function applyQuality() {
     quality = S.quality === 'lite' ? 'lite' : 'full';
-    const ratio = quality === 'lite' ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
+    // Macs with 8 GB share that memory with speech recognition, so they get a little less detail.
+    const ratio = quality === 'lite' ? 1 : Math.min(window.devicePixelRatio || 1, S.lowMemory ? 1.25 : 1.5);
     renderer.setPixelRatio(ratio);
     composer.setPixelRatio(ratio);
     dustMaterial.uniforms.uPixelRatio.value = ratio;
@@ -575,7 +577,7 @@ function start() {
   function frame(now) {
     requestAnimationFrame(frame);
     if (S.paused) return;                      // (used to take still pictures for the docs)
-    if (S.quality !== quality) applyQuality();
+    if (S.quality !== quality || S.lowMemory !== lowMemory) { lowMemory = S.lowMemory; applyQuality(); }
     // Leave the graphics chip to speech recognition while it works; save power in Lite mode.
     const minGap = S.state === 'transcribing' ? 100 : quality === 'lite' ? 33 : 0;
     if (now - lastFrame < minGap) return;

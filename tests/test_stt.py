@@ -33,7 +33,7 @@ import subprocess  # noqa: E402
 
 import numpy as np  # noqa: E402
 
-from jarvis.stt import MlxWhisper, mac_memory_gb, timed_transcription  # noqa: E402
+from jarvis.stt import SPARE_MEMORY_BYTES, MlxMemory, MlxWhisper, mac_memory_gb, timed_transcription  # noqa: E402
 
 
 class FakeMlxWhisper:
@@ -106,3 +106,67 @@ def test_swap_used_gb():
 def test_default_apple_model_is_the_small_one():
     from jarvis.config import Config
     assert Config().whisper_model_apple == "mlx-community/whisper-small-mlx"
+
+
+class FakeMx:
+    """Stands in for mlx.core's memory controls."""
+
+    def __init__(self, ceiling=5_000_000_000, fail=False):
+        self.calls, self.ceiling, self.fail = [], ceiling, fail
+
+    def _check(self):
+        if self.fail:
+            raise RuntimeError("no Metal")
+
+    def set_cache_limit(self, n):
+        self._check()
+        self.calls.append(("cache", n))
+
+    def clear_cache(self):
+        self._check()
+        self.calls.append(("clear",))
+
+    def device_info(self):
+        return {"max_recommended_working_set_size": self.ceiling} if self.ceiling else {}
+
+    def set_wired_limit(self, n):
+        self._check()
+        self.calls.append(("wired", n))
+
+    def get_active_memory(self):
+        return 600 * 1024 ** 2
+
+    def get_cache_memory(self):
+        return 100 * 1024 ** 2
+
+
+class FakeMemory(MlxMemory):
+    def __init__(self, core, model_bytes=500_000_000):
+        super().__init__(core)
+        self._bytes = model_bytes
+
+    def model_bytes(self):
+        return self._bytes
+
+
+def test_speech_model_is_kept_in_memory_with_a_small_reserve():
+    mx = FakeMx()
+    stt = MlxWhisper("m", mlx_module=FakeMlxWhisper(), memory=FakeMemory(mx))
+    assert mx.calls[0] == ("cache", SPARE_MEMORY_BYTES)             # set before the model loads
+    assert ("wired", 500_000_000 + SPARE_MEMORY_BYTES) in mx.calls     # model plus its reserve
+    assert stt.resident_bytes == 500_000_000 + SPARE_MEMORY_BYTES
+    stt.transcribe(np.zeros(1600, dtype=np.float32))
+    assert stt.last_memory == {"in_use_gb": 0.59, "spare_gb": 0.1}
+
+
+def test_resident_memory_never_takes_more_than_half_of_what_macos_allows():
+    mx = FakeMx(ceiling=600_000_000)
+    stt = MlxWhisper("m", mlx_module=FakeMlxWhisper(), memory=FakeMemory(mx, model_bytes=1_500_000_000))
+    assert stt.resident_bytes == 300_000_000
+
+
+def test_memory_tuning_is_skipped_when_unavailable():
+    for memory in (FakeMemory(FakeMx(ceiling=0)), FakeMemory(FakeMx(fail=True)), None):
+        stt = MlxWhisper("m", mlx_module=FakeMlxWhisper(), memory=memory)
+        assert stt.resident_bytes == 0
+        assert stt.transcribe(np.zeros(1600, dtype=np.float32)) == "How are you doing today?"

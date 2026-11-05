@@ -18,7 +18,7 @@ from .brain import BrainError, PermissionRequest, TextDelta, ToolCall, TurnDone
 from .config import Config, ConfigError, load_config
 from .logs import TurnLogger, setup_logging, stderr_to_file
 from .permissions import REPROMPT, parse_answer, permission_question
-from .stt import clean_transcript
+from .stt import clean_transcript, swap_used_gb
 from .tts import SentenceSplitter
 
 log = logging.getLogger(__name__)
@@ -76,7 +76,8 @@ class Jarvis:
                  clock: Callable[[], float] = time.monotonic,
                  events: Callable[[str, dict], None] | None = None,
                  commands: Callable[[], Any] | None = None,
-                 save_settings: Callable[[dict], None] | None = None):
+                 save_settings: Callable[[dict], None] | None = None,
+                 swap_gb: Callable[[], float | None] = swap_used_gb):
         self.cfg, self.wake, self.endpointer = cfg, wake, endpointer
         self.transcriber, self.speaker, self.brain = transcriber, speaker, brain
         self.logger, self.hotkey, self.chime, self.ui = logger, hotkey, chime, ui
@@ -98,6 +99,8 @@ class Jarvis:
         self._ui_talk = False
         self.muted = False                    # microphone off: no wake word, no listening
         self.voice_replies = True             # False: answers are shown but not spoken
+        self.swap_gb = swap_gb                # how much memory macOS has moved to the disk
+        self._slow_warned_at = -1e9
 
     def _emit(self, kind: str, **data: Any) -> None:
         if self.events:
@@ -377,6 +380,26 @@ class Jarvis:
         self.pending = None
         p.resolve(answer)
 
+    def _check_transcription_speed(self, seconds: float, audio_s: float) -> None:
+        """Log what each transcription cost; if it was slow, say why (at most every 5 minutes)."""
+        memory = getattr(self.transcriber, "last_memory", {}) or {}
+        slow = seconds > SLOW_TRANSCRIPTION_S
+        swapped = self.swap_gb() if slow else None
+        self.logger.log("transcribed", seconds=round(seconds, 2), audio_s=round(audio_s, 1),
+                        swap_gb=swapped, **memory)
+        if not slow or self.clock() - self._slow_warned_at < 300:
+            return
+        self._slow_warned_at = self.clock()
+        if swapped is not None and swapped >= 0.5:
+            why = (f"your Mac is short of memory and has moved {swapped:.1f} GB to the disk. "
+                   "Quitting other apps, especially web browsers, will speed me up.")
+        else:
+            why = "your Mac was busy with something else. Quitting other apps may help."
+        msg = f"Understanding you took {seconds:.0f} seconds, which is too slow: {why}"
+        log.warning(msg)
+        self.ui(f"({msg})")
+        self._emit("notice", text=msg)
+
     def _show_transcribing(self) -> None:
         """Tell the HUD right away: transcription blocks this loop for a moment."""
         self._hud_state = ("transcribing", False)
@@ -388,6 +411,7 @@ class Jarvis:
         raw = self.transcriber.transcribe(audio)
         self.timing = {"heard_at": started, "transcribe_s": self.clock() - started,
                        **getattr(self.endpointer, "stats", {})}
+        self._check_transcription_speed(self.timing["transcribe_s"], len(audio) / 16_000)
         text = clean_transcript(raw)
         if text is None:
             self.logger.log("dropped_transcript", text=raw)
@@ -642,6 +666,9 @@ def _warm_up_listening(transcriber: Any, engines: list, chip: str) -> float | No
     text, seconds = timed_transcription(transcriber, audio)
     log.info("Warm-up transcription took %.2fs: %r", seconds, text)
     say_to_user(f"  Speech recognition test: understood a sample sentence in {seconds:.1f}s")
+    resident = getattr(transcriber, "resident_bytes", 0)
+    if resident:
+        say_to_user(f"  Speech model kept in memory ({resident / 1024 ** 3:.1f} GB), so it stays quick")
     memory, swapped = mac_memory_gb(), swap_used_gb()
     if memory:
         line = f"  This Mac has {memory:.0f} GB of memory"
