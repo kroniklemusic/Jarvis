@@ -51,12 +51,9 @@ curl -fsSL https://claude.ai/install.sh | bash
 Close Terminal and open a **new** window. Type `claude`, press Return, and sign in with your
 Claude Pro or Max account. When you see the chat prompt, type `/exit`.
 
-**3. Download JARVIS:**
-```bash
-git clone https://github.com/kroniklemusic/jarvis.git ~/jarvis
-```
-If a box appears asking to install "command line developer tools", click **Install**, wait until it
-finishes, then paste the line again.
+**3. Put JARVIS in your home folder:** JARVIS lives only on your Mac, in a folder called `jarvis`
+inside your home folder (`~/jarvis`). It isn't downloaded from anywhere. To move it to another Mac,
+copy that whole folder across, for example with AirDrop or a USB drive.
 
 **4. Run setup:**
 ```bash
@@ -217,7 +214,7 @@ in **`memory/facts.md`**, a plain text file inside the `jarvis` folder.
 - To check or correct what it knows, open `memory/facts.md` with TextEdit. You can edit or delete
   any line.
 - It never stores passwords, card numbers or anything you call secret.
-- Your memory file is never uploaded to GitHub. Setup tells git to leave it alone.
+- Your memory file stays on your Mac. It is never uploaded anywhere.
 
 ## Start automatically at login
 
@@ -334,7 +331,7 @@ It checks each of these and tells you how to fix anything that fails:
 | What you see or hear | What to do |
 |---|---|
 | "I can't use the microphone" | Turn on **JARVIS** (or Terminal, if you run it from Terminal) under System Settings → Privacy & Security → Microphone, then quit and reopen JARVIS. |
-| Spotlight or Launchpad shows **two** JARVIS apps | Older versions left a second copy inside the jarvis folder. Run `cd ~/jarvis && git pull && ./app/build-app.sh`. It removes the extra copy and keeps a single JARVIS in Applications. |
+| Spotlight or Launchpad shows **two** JARVIS apps | Older versions left a second copy inside the jarvis folder. Run `cd ~/jarvis && ./app/build-app.sh`. It removes the extra copy and keeps a single JARVIS in Applications. |
 | The display feels slow or your Mac's fans spin up | Open Settings (gear icon) → Display → **Lite**. |
 | JARVIS doesn't appear in Applications / setup says "The app couldn't be built" | Install Apple's command line tools with `xcode-select --install`, then run `./app/build-app.sh`. Until then, start JARVIS from Terminal with `.venv/bin/python -m jarvis`. |
 | The JARVIS window says "JARVIS can't continue" | The message says what's wrong. Click **Open Logs Folder** for details (`app.log` and `jarvis.log`), or run `./doctor.sh`. |
@@ -358,15 +355,19 @@ It checks each of these and tells you how to fix anything that fails:
 | The timing line says "understood your words" took many seconds | Speech recognition is struggling, usually because the Mac is short of memory. JARVIS keeps its speech model in memory and its reserve small so this is rare, and when it happens it says why in Comms (for example, how much memory has overflowed to the disk). Quit other apps, especially web browsers, and use the **Lite** display. Keep `whisper_model_apple` on the small model unless your Mac has 16 GB or more. Each request's speed and memory use is recorded in `logs/conversation-YYYY-MM-DD.jsonl` (lines marked `transcribed`). |
 | JARVIS takes several seconds to start speaking, or the speech sounds choppy | Run `./doctor.sh --voice`. It times each voice on your Mac, plays three test sentences, and prints the results in plain English. If Kokoro is "too slow", set `tts_engines: [piper, kokoro, say]` in `config.yaml` to use the faster Piper voice. |
 | The voice suddenly sounds different or robotic | The main voice (Kokoro) failed, so JARVIS switched to a backup. Run `./setup.sh` again. |
-| "There's a problem in config.yaml" | The message names the setting. Fix the spelling or value, or copy that line back from GitHub. |
+| "There's a problem in config.yaml" | The message names the setting. Fix the spelling or value. The comment above each setting in `config.yaml` shows what it accepts. |
 | Setup stopped while downloading | Check your internet connection and run `./setup.sh` again. It continues where it left off. |
 | JARVIS (or a Terminal window) opens every time I log in | That's autostart. Turn it off with `~/jarvis/launchd/install-autostart.sh --remove`. |
 
 ## Updating and removing
 
-**Update to the latest version:**
+**After changing JARVIS's code:** run setup again so any new parts are installed, and rebuild the app
+if `app/main.swift` changed:
 ```bash
-cd ~/jarvis && git pull && ./setup.sh
+cd ~/jarvis && ./setup.sh
+```
+```bash
+cd ~/jarvis && ./app/build-app.sh
 ```
 
 **Remove JARVIS completely:**
